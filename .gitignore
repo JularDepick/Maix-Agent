@@ -1,0 +1,26 @@
+# Rust
+/target/
+/release/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.claude/
+.startClaude.bat
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Maix-Agent logs
+*.log
+
+# Env
+.env
+.env.local
+
+# Docs
+docs/devOutline/

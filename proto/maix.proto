@@ -1,0 +1,132 @@
+syntax = "proto3";
+package maix.core.v1;
+
+import "google/protobuf/struct.proto";
+import "common.proto";
+import "agent.proto";
+import "session.proto";
+import "tool.proto";
+import "memory.proto";
+import "task.proto";
+import "skill.proto";
+
+service CoreService {
+  // Lifecycle
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+
+  // Sessions
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+
+  // Chat (bidirectional stream)
+  rpc Chat(stream ChatInput) returns (stream ChatOutput);
+
+  // Agent management
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  rpc ActivateAgent(ActivateAgentRequest) returns (ActivateAgentResponse);
+
+  // Tools
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+  rpc CallTool(CallToolRequest) returns (CallToolResponse);
+
+  // Memory
+  rpc SearchMemory(SearchMemoryRequest) returns (SearchMemoryResponse);
+  rpc SaveMemory(SaveMemoryRequest) returns (SaveMemoryResponse);
+  rpc ForgetMemory(ForgetMemoryRequest) returns (ForgetMemoryResponse);
+
+  // Task queue
+  rpc SubmitTask(SubmitTaskRequest) returns (SubmitTaskResponse);
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+  rpc ReprioritizeTask(ReprioritizeTaskRequest) returns (ReprioritizeTaskResponse);
+  rpc SuspendTask(SuspendTaskRequest) returns (SuspendTaskResponse);
+  rpc ResumeTask(ResumeTaskRequest) returns (ResumeTaskResponse);
+
+  // Skills
+  rpc InstallSkill(InstallSkillRequest) returns (InstallSkillResponse);
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+  rpc RemoveSkill(RemoveSkillRequest) returns (RemoveSkillResponse);
+  rpc EnableSkill(EnableSkillRequest) returns (EnableSkillResponse);
+  rpc DisableSkill(DisableSkillRequest) returns (DisableSkillResponse);
+
+  // Multi-agent architectures
+  rpc ListArchitectures(ListArchitecturesRequest) returns (ListArchitecturesResponse);
+  rpc RunArchitecture(RunArchitectureRequest) returns (stream RunArchitectureOutput);
+
+  // Event bus
+  rpc SubscribeEvents(SubscribeEventsRequest) returns (stream Event);
+
+  // Work status
+  rpc GetWorkStatus(GetWorkStatusRequest) returns (WorkStatusSnapshot);
+  rpc WatchWorkStatus(WatchWorkStatusRequest) returns (stream WorkStatusSnapshot);
+}
+
+// --------------------------------------------------------------------------
+// Lifecycle
+// --------------------------------------------------------------------------
+message HealthCheckRequest {}
+message HealthCheckResponse {
+  string status = 1;
+  string version = 2;
+  uint64 uptime_secs = 3;
+  uint32 active_sessions = 4;
+  uint32 queue_depth = 5;
+}
+
+message ShutdownRequest { bool force = 1; }
+message ShutdownResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+// --------------------------------------------------------------------------
+// Events
+// --------------------------------------------------------------------------
+message SubscribeEventsRequest {
+  repeated string event_types = 1;
+}
+
+message Event {
+  string type = 1;
+  string agent_id = 2;
+  string timestamp = 3;
+  google.protobuf.Struct payload = 4;
+}
+
+message GetWorkStatusRequest {}
+message WatchWorkStatusRequest { uint32 interval_secs = 1; }
+
+message WorkStatusSnapshot {
+  uint32 total_agents = 1;
+  uint32 active_agents = 2;
+  uint32 idle_agents = 3;
+  uint32 queue_depth = 4;
+  uint64 tasks_completed = 5;
+  uint64 tasks_failed = 6;
+  uint64 total_tokens = 7;
+  double total_cost = 8;
+  uint64 uptime_secs = 9;
+  repeated AgentSnapshot agents = 10;
+}
+
+message AgentSnapshot {
+  string agent_id = 1;
+  string role = 2;
+  string state = 3;
+  optional string current_task = 4;
+  uint64 total_tokens = 5;
+  uint32 tool_calls = 6;
+  double avg_latency_ms = 7;
+}
+
+// --------------------------------------------------------------------------
+// Client handshake
+// --------------------------------------------------------------------------
+message ClientInfo {
+  string client_type = 1;
+  string version = 2;
+  uint32 pid = 3;
+  string hostname = 4;
+}

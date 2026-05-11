@@ -1,0 +1,78 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/maix-core",
+    "crates/maix-provider",
+    "crates/maix-agent",
+    "crates/maix-task-queue",
+    "crates/maix-memory",
+    "crates/maix-tools",
+    "crates/maix-skills",
+    "crates/maix-monitor",
+    "crates/maix-cli",
+    "crates/maix-tui",
+    "crates/maix-server",
+    "crates/maix-db",
+    "crates/maix-gateway",
+]
+
+[workspace.dependencies]
+# Async
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# HTTP
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls", "json"] }
+
+# Config
+figment = { version = "0.10", features = ["toml", "env"] }
+toml = "0.8"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error
+thiserror = "2"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# gRPC
+tonic = { version = "0.12", features = ["transport"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# HTTP Server
+axum = { version = "0.8", features = ["ws"] }
+tower = { version = "0.5", features = ["limit"] }
+async-stream = "0.3"
+
+# Misc
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+futures-core = "0.3"
+
+# Local crates
+maix-core = { path = "crates/maix-core" }
+maix-db = { path = "crates/maix-db" }
+maix-provider = { path = "crates/maix-provider" }
+maix-agent = { path = "crates/maix-agent" }
+maix-task-queue = { path = "crates/maix-task-queue" }
+maix-memory = { path = "crates/maix-memory" }
+maix-tools = { path = "crates/maix-tools" }
+maix-skills = { path = "crates/maix-skills" }
+maix-monitor = { path = "crates/maix-monitor" }
+maix-gateway = { path = "crates/maix-gateway" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
