@@ -1,0 +1,13 @@
+[package]
+name = "maix-monitor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+maix-core.workspace = true
+maix-agent.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true

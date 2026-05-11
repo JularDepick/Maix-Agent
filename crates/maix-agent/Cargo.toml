@@ -1,0 +1,21 @@
+[package]
+name = "maix-agent"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+maix-core.workspace = true
+maix-provider.workspace = true
+maix-memory.workspace = true
+maix-tools.workspace = true
+maix-skills.workspace = true
+maix-task-queue.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid = { version = "1", features = ["v4"] }
+futures.workspace = true

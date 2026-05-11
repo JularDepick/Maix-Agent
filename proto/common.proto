@@ -1,0 +1,78 @@
+syntax = "proto3";
+package maix.common.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+message UUID {
+  string value = 1;
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_SYSTEM = 1;
+  ROLE_USER = 2;
+  ROLE_ASSISTANT = 3;
+  ROLE_TOOL = 4;
+}
+
+message Message {
+  Role role = 1;
+  MessageContent content = 2;
+  optional string name = 3;
+  optional string tool_call_id = 4;
+  repeated ToolCall tool_calls = 5;
+}
+
+message MessageContent {
+  oneof content {
+    string text = 1;
+    ContentParts parts = 2;
+  }
+}
+
+message ContentParts {
+  repeated ContentPart parts = 1;
+}
+
+message ContentPart {
+  oneof part {
+    TextPart text = 1;
+    ImagePart image = 2;
+  }
+}
+
+message TextPart { string text = 1; }
+
+message ImagePart {
+  string url = 1;
+  optional string detail = 2;
+}
+
+message ToolCall {
+  string id = 1;
+  string type = 2;
+  FunctionCall function = 3;
+}
+
+message FunctionCall {
+  string name = 1;
+  string arguments = 2;
+}
+
+message ToolDef {
+  string type = 1;
+  FunctionDef function = 2;
+}
+
+message FunctionDef {
+  string name = 1;
+  string description = 2;
+  google.protobuf.Struct parameters = 3;
+}
+
+message TokenUsage {
+  uint64 prompt_tokens = 1;
+  uint64 completion_tokens = 2;
+  uint64 total_tokens = 3;
+}

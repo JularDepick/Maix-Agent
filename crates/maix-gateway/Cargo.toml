@@ -1,0 +1,24 @@
+[package]
+name = "maix-gateway"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "maix-gateway"
+path = "src/main.rs"
+
+[dependencies]
+maix-core.workspace = true
+tonic.workspace = true
+clap.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-stream.workspace = true
+uuid = { version = "1", features = ["v4"] }
+chrono.workspace = true
+futures.workspace = true

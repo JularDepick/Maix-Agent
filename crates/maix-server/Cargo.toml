@@ -1,0 +1,37 @@
+[package]
+name = "maix-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "maix"
+path = "src/main.rs"
+
+[dependencies]
+maix-core.workspace = true
+maix-provider.workspace = true
+maix-agent.workspace = true
+maix-task-queue.workspace = true
+maix-memory.workspace = true
+maix-tools.workspace = true
+maix-skills.workspace = true
+maix-monitor.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid = { version = "1", features = ["v4"] }
+chrono.workspace = true
+futures.workspace = true
+
+# gRPC
+tonic.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+
+# CLI
+clap.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+daemonize = "0.5"

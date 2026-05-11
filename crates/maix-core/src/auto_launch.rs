@@ -1,0 +1,119 @@
+//! Client auto-launcher — ensures maix.exe is running before clients connect.
+
+use std::path::PathBuf;
+
+const POLL_INTERVAL_MS: u64 = 200;
+const STARTUP_TIMEOUT_MS: u64 = 10_000;
+
+fn exe_name(base: &str) -> String {
+    if cfg!(target_os = "windows") {
+        format!("{base}.exe")
+    } else {
+        base.to_string()
+    }
+}
+
+fn find_maix_exe() -> Option<PathBuf> {
+    // 1. Next to the current exe
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(dir) = current_exe.parent() {
+            let candidate = dir.join(exe_name("maix"));
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // 2. target/release/ relative to CARGO_MANIFEST_DIR (dev layout)
+    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        let candidate = PathBuf::from(&manifest_dir)
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("target").join("release").join(exe_name("maix")));
+        if let Some(ref c) = candidate {
+            if c.exists() {
+                return candidate;
+            }
+        }
+    }
+
+    // 3. On PATH
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join(exe_name("maix"));
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+async fn spawn_and_wait(exe_path: &std::path::Path, server_addr: &str) -> bool {
+    let mut cmd = std::process::Command::new(exe_path);
+    cmd.arg("--foreground");
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::null());
+
+    match cmd.spawn() {
+        Ok(child) => {
+            tracing::info!("Launched maix daemon (pid {})", child.id());
+            poll_health(server_addr).await
+        }
+        Err(e) => {
+            tracing::error!("Failed to spawn maix: {e}");
+            false
+        }
+    }
+}
+
+async fn poll_health(server_addr: &str) -> bool {
+    let deadline = tokio::time::Instant::now()
+        + std::time::Duration::from_millis(STARTUP_TIMEOUT_MS);
+
+    loop {
+        if let Ok(true) = try_health_check(server_addr).await { return true }
+
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
+    }
+}
+
+async fn try_health_check(server_addr: &str) -> Result<bool, std::io::Error> {
+    let stream = tokio::net::TcpStream::connect(server_addr).await?;
+    drop(stream);
+    Ok(true)
+}
+
+/// Ensure the maix.exe daemon is running.
+///
+/// Returns `true` if the server is reachable (already running or successfully
+/// launched). Returns `false` if the server could not be started.
+pub async fn ensure_server_running(server_addr: &str) -> bool {
+    if try_health_check(server_addr).await.unwrap_or(false) {
+        tracing::debug!("maix server already running at {server_addr}");
+        return true;
+    }
+
+    match find_maix_exe() {
+        Some(exe) => {
+            tracing::info!("Starting maix daemon: {}", exe.display());
+            spawn_and_wait(&exe, server_addr).await
+        }
+        None => {
+            tracing::error!("Could not find maix executable. Is maix installed?");
+            false
+        }
+    }
+}

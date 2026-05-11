@@ -1,0 +1,108 @@
+syntax = "proto3";
+package maix.core.v1;
+
+import "common.proto";
+import "google/protobuf/struct.proto";
+
+// Chat bidirectional stream messages
+message ChatInput {
+  oneof input {
+    UserMessage user_message = 1;
+    ToolApproval tool_approval = 2;
+    CancelRequest cancel = 3;
+    SetMode set_mode = 4;
+  }
+}
+
+message UserMessage {
+  string session_id = 1;
+  string text = 2;
+  optional string identity = 3;
+  optional string architecture = 4;
+}
+
+message ToolApproval {
+  string session_id = 1;
+  string tool_call_id = 2;
+  bool approved = 3;
+  string reason = 4;
+}
+
+message CancelRequest { string session_id = 1; }
+
+message SetMode {
+  string session_id = 1;
+  AgentMode mode = 2;
+}
+
+enum AgentMode {
+  AGENT_MODE_UNSPECIFIED = 0;
+  AGENT_MODE_PLAN = 1;
+  AGENT_MODE_AGENT = 2;
+  AGENT_MODE_YOLO = 3;
+}
+
+// Chat stream output messages
+message ChatOutput {
+  oneof output {
+    StatusUpdate status = 1;
+    TextDelta text_delta = 2;
+    ReasoningDelta reasoning_delta = 3;
+    ToolCallRequest tool_call = 4;
+    ToolResult tool_result = 5;
+    ResponseComplete complete = 6;
+    ErrorEvent error = 7;
+  }
+}
+
+message StatusUpdate {
+  string session_id = 1;
+  AgentState state = 2;
+}
+
+enum AgentState {
+  AGENT_STATE_UNSPECIFIED = 0;
+  AGENT_STATE_IDLE = 1;
+  AGENT_STATE_THINKING = 2;
+  AGENT_STATE_EXECUTING_TOOL = 3;
+  AGENT_STATE_WAITING_APPROVAL = 4;
+  AGENT_STATE_RESPONDING = 5;
+  AGENT_STATE_UPDATING_MEMORY = 6;
+  AGENT_STATE_ERRORED = 7;
+}
+
+message TextDelta {
+  string session_id = 1;
+  string text = 2;
+}
+
+message ReasoningDelta {
+  string session_id = 1;
+  string text = 2;
+}
+
+message ToolCallRequest {
+  string session_id = 1;
+  string tool_call_id = 2;
+  string tool_name = 3;
+  google.protobuf.Struct arguments = 4;
+  bool needs_approval = 5;
+}
+
+message ToolResult {
+  string session_id = 1;
+  string tool_call_id = 2;
+  string result = 3;
+}
+
+message ResponseComplete {
+  string session_id = 1;
+  string text = 2;
+  maix.common.v1.TokenUsage usage = 3;
+}
+
+message ErrorEvent {
+  string session_id = 1;
+  string code = 2;
+  string message = 3;
+}

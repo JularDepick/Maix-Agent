@@ -1,0 +1,22 @@
+[package]
+name = "maix-core"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+figment.workspace = true
+toml.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+prost = "0.13"
+prost-types = "0.13"
+tonic = "0.12"
+tokio = { version = "1", features = ["sync"] }
+tokio-stream = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[build-dependencies]
+tonic-build = "0.12"
