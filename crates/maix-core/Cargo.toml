@@ -1,6 +1,6 @@
 [package]
 name = "maix-core"
-version = "0.2.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
@@ -15,8 +15,12 @@ prost = "0.13"
 prost-types = "0.13"
 tonic = "0.12"
 tokio = { version = "1", features = ["sync"] }
+regex = "1"
 tokio-stream = "0.1"
 uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [build-dependencies]
 tonic-build = "0.12"

@@ -1,6 +1,8 @@
 //! Maix-Agent HTTP Gateway — gRPC-to-HTTP bridge.
 //! Translates REST/SSE/WebSocket requests to gRPC calls on maix-server.
 
+pub mod bridges;
+
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -18,17 +20,29 @@ use maix_core::proto::maix::core::v1 as pb;
 use serde::Deserialize;
 use std::convert::Infallible;
 use std::sync::Arc;
+use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Parser)]
 #[command(name = "maix-gateway", version)]
 struct Cli {
-    #[arg(long, default_value = "0.0.0.0:8080")]
+    #[arg(long, default_value = "0.0.0.0:26507")]
     listen: String,
     #[arg(long, default_value = "127.0.0.1:26506")]
     server: String,
+    /// Auto-launch maix daemon if not running
+    #[arg(long)]
+    launch: bool,
 }
 
 type GatewayState = Arc<MaixClient>;
+
+fn error_response(message: impl Into<String>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "error": {
+            "message": message.into()
+        }
+    }))
+}
 
 // ---------------------------------------------------------------------------
 // Request types
@@ -91,14 +105,30 @@ async fn main() {
     let listen_addr = &cli.listen;
     let server_addr = &cli.server;
 
+    // Auto-launch if requested
+    if cli.launch {
+        if let Err(e) = maix_core::ensure_server_running(server_addr).await {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+
+    // Connect to daemon
     let client = MaixClient::connect(server_addr).await.unwrap_or_else(|e| {
-        tracing::error!("Failed to connect to maix at {}: {e}", server_addr);
+        eprintln!("Cannot connect to maix at {}. Is maix running?", server_addr);
+        eprintln!("  Hint: maix --foreground  (or use --launch to auto-start)");
+        tracing::debug!("connect error: {e}");
         std::process::exit(1);
     });
 
     if let Ok(h) = client.health_check().await {
-        tracing::debug!("Connected to maix v{} (uptime {}s)", h.version, h.uptime_secs);
+        tracing::info!("Connected to maix v{} (uptime {}s)", h.version, h.uptime_secs);
     }
+
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
 
     let app = Router::new()
         .route("/health", get(health))
@@ -108,6 +138,7 @@ async fn main() {
         .route("/v1/ws/events", get(ws_events))
         .route("/v1/sessions", get(list_sessions).delete(delete_session))
         .route("/v1/sessions/{id}", delete(delete_session_by_id))
+        .route("/v1/sessions/{id}/messages", get(get_session_messages))
         .route("/v1/memory", get(search_memory).post(save_memory))
         .route("/v1/memory/{id}", delete(delete_memory))
         .route("/v1/memory/compact", post(compact_memory))
@@ -131,6 +162,7 @@ async fn main() {
         .route("/v1/architectures/{name}/run", post(run_architecture))
         .route("/v1/work-status/snapshot", get(work_status_snapshot))
         .route("/v1/ws/work-status", get(ws_work_status))
+        .layer(cors)
         .with_state(Arc::new(client));
 
     tracing::info!("Maix-Gateway listening on http://{listen_addr}");
@@ -275,44 +307,39 @@ async fn handle_ws_chat(mut socket: WebSocket, client: Arc<MaixClient>) {
                         serde_json::json!({"type": "thinking", "session_id": session_id}).to_string().into()
                     )).await;
 
-                    loop {
-                        match handle.recv().await {
-                            Some(Ok(msg)) => {
-                                if let Some(out) = msg.output {
-                                    let resp = match out {
-                                        pb::chat_output::Output::TextDelta(d) => {
-                                            if d.text.is_empty() {
-                                                continue;
-                                            }
-                                            serde_json::json!({"type": "text", "content": d.text})
-                                        }
-                                        pb::chat_output::Output::ToolCall(tc) => {
-                                            serde_json::json!({
-                                                "type": "tool_call",
-                                                "name": tc.tool_name,
-                                                "args": tc.arguments.map(maix_core::prost_struct_to_json),
-                                            })
-                                        }
-                                        pb::chat_output::Output::ToolResult(tr) => {
-                                            serde_json::json!({
-                                                "type": "tool_result",
-                                                "result": tr.result,
-                                            })
-                                        }
-                                        pb::chat_output::Output::Complete(_) => {
-                                            serde_json::json!({"type": "done", "session_id": session_id})
-                                        }
-                                        pb::chat_output::Output::Error(e) => {
-                                            serde_json::json!({"type": "error", "message": e.message})
-                                        }
-                                        _ => continue,
-                                    };
-                                    if socket.send(Message::Text(resp.to_string().into())).await.is_err() {
-                                        break;
+                    while let Some(Ok(msg)) = handle.recv().await {
+                        if let Some(out) = msg.output {
+                            let resp = match out {
+                                pb::chat_output::Output::TextDelta(d) => {
+                                    if d.text.is_empty() {
+                                        continue;
                                     }
+                                    serde_json::json!({"type": "text", "content": d.text})
                                 }
+                                pb::chat_output::Output::ToolCall(tc) => {
+                                    serde_json::json!({
+                                        "type": "tool_call",
+                                        "name": tc.tool_name,
+                                        "args": tc.arguments.map(maix_core::prost_struct_to_json),
+                                    })
+                                }
+                                pb::chat_output::Output::ToolResult(tr) => {
+                                    serde_json::json!({
+                                        "type": "tool_result",
+                                        "result": tr.result,
+                                    })
+                                }
+                                pb::chat_output::Output::Complete(_) => {
+                                    serde_json::json!({"type": "done", "session_id": session_id})
+                                }
+                                pb::chat_output::Output::Error(e) => {
+                                    serde_json::json!({"type": "error", "message": e.message})
+                                }
+                                _ => continue,
+                            };
+                            if socket.send(Message::Text(resp.to_string().into())).await.is_err() {
+                                break;
                             }
-                            _ => break,
                         }
                     }
                 }
@@ -405,6 +432,26 @@ async fn delete_session_by_id(
     }
 }
 
+async fn get_session_messages(
+    State(client): State<GatewayState>,
+    Path(id): Path<String>,
+) -> Json<serde_json::Value> {
+    match client.get_session_messages(&id, 100).await {
+        Ok(msgs) => {
+            let items: Vec<_> = msgs.iter().map(|m| {
+                serde_json::json!({
+                    "role": m.role,
+                    "content": m.content,
+                    "token_count": m.token_count,
+                    "created_at": m.created_at,
+                })
+            }).collect();
+            Json(serde_json::json!({ "messages": items }))
+        }
+        Err(e) => error_response(e.to_string()),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Memory
 // ---------------------------------------------------------------------------
@@ -428,7 +475,7 @@ async fn search_memory(
             }).collect();
             Json(serde_json::json!({ "entries": items }))
         }
-        Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => error_response(e.to_string()),
     }
 }
 
@@ -476,7 +523,7 @@ async fn list_tasks(State(client): State<GatewayState>) -> Json<serde_json::Valu
             }).collect();
             Json(serde_json::json!({ "tasks": tasks }))
         }
-        Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => error_response(e.to_string()),
     }
 }
 
@@ -561,7 +608,7 @@ async fn list_tools(State(client): State<GatewayState>) -> Json<serde_json::Valu
             }).collect();
             Json(serde_json::json!({ "tools": defs }))
         }
-        Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => error_response(e.to_string()),
     }
 }
 
@@ -665,7 +712,7 @@ async fn list_identities(State(client): State<GatewayState>) -> Json<serde_json:
             }).collect();
             Json(serde_json::json!({ "identities": list }))
         }
-        Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => error_response(e.to_string()),
     }
 }
 
@@ -724,7 +771,7 @@ async fn list_architectures(State(client): State<GatewayState>) -> Json<serde_js
             }).collect();
             Json(serde_json::json!({ "architectures": list }))
         }
-        Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => error_response(e.to_string()),
     }
 }
 
@@ -795,7 +842,7 @@ async fn work_status_snapshot(State(client): State<GatewayState>) -> Json<serde_
             "total_cost": snap.total_cost,
             "uptime_secs": snap.uptime_secs,
         })),
-        Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => error_response(e.to_string()),
     }
 }
 

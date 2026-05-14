@@ -38,7 +38,7 @@ pub trait LLMProvider: Send + Sync {
     /// Max context window size in tokens.
     fn context_window(&self) -> usize;
 
-    /// Model name, e.g. "deepseek-chat".
+    /// Model name.
     fn model_name(&self) -> &str;
 
     /// Provider capabilities.

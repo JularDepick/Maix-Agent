@@ -5,7 +5,7 @@ pub mod event_bus;
 pub mod perf;
 
 use chrono::{DateTime, Utc};
-use maix_agent::AgentState;
+use maix_core::AgentState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

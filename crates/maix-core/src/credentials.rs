@@ -80,11 +80,11 @@ fn dirs_fallback() -> PathBuf {
 // Example credentials.json format:
 // {
 //   "keys": {
-//     "deepseek-v4-pro": "sk-...",
-//     "minimax-mino-2.5": "sk-..."
+//     "provider-a": "sk-...",
+//     "provider-b": "sk-..."
 //   },
 //   "bases": {
-//     "deepseek-v4-pro": "https://api.deepseek.com",
-//     "minimax-mino-2.5": "https://api.minimax.chat"
+//     "provider-a": "https://api.example-a.com",
+//     "provider-b": "https://api.example-b.com"
 //   }
 // }

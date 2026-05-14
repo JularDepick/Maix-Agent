@@ -152,7 +152,7 @@ pub fn prost_struct_to_json(s: prost_types::Struct) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
-fn prost_value_to_json(v: prost_types::Value) -> serde_json::Value {
+pub fn prost_value_to_json(v: prost_types::Value) -> serde_json::Value {
     use prost_types::value::Kind;
     match v.kind {
         Some(Kind::NullValue(_)) => serde_json::Value::Null,
@@ -280,6 +280,8 @@ impl From<types::TokenUsage> for pb_common::TokenUsage {
             prompt_tokens: tu.prompt_tokens,
             completion_tokens: tu.completion_tokens,
             total_tokens: tu.total_tokens,
+            cache_read_tokens: tu.cache_read_tokens,
+            cache_write_tokens: tu.cache_write_tokens,
         }
     }
 }
@@ -290,6 +292,8 @@ impl From<pb_common::TokenUsage> for types::TokenUsage {
             prompt_tokens: tu.prompt_tokens,
             completion_tokens: tu.completion_tokens,
             total_tokens: tu.total_tokens,
+            cache_read_tokens: tu.cache_read_tokens,
+            cache_write_tokens: tu.cache_write_tokens,
         }
     }
 }
@@ -349,12 +353,16 @@ mod tests {
             prompt_tokens: 100,
             completion_tokens: 50,
             total_tokens: 150,
+            cache_read_tokens: 80,
+            cache_write_tokens: 20,
         };
         let pb: pb_common::TokenUsage = tu.clone().into();
         let back: types::TokenUsage = pb.into();
         assert_eq!(tu.prompt_tokens, back.prompt_tokens);
         assert_eq!(tu.completion_tokens, back.completion_tokens);
         assert_eq!(tu.total_tokens, back.total_tokens);
+        assert_eq!(tu.cache_read_tokens, back.cache_read_tokens);
+        assert_eq!(tu.cache_write_tokens, back.cache_write_tokens);
     }
 
     #[test]

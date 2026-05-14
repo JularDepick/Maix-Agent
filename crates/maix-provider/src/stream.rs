@@ -18,6 +18,11 @@ impl ChatStream {
         Self { receiver: rx }
     }
 
+    /// Create a ChatStream from an existing receiver (for non-OpenAI protocols).
+    pub fn from_receiver(rx: mpsc::Receiver<Result<ChatChunk, maix_core::MaixError>>) -> Self {
+        Self { receiver: rx }
+    }
+
     async fn read_sse(
         resp: reqwest::Response,
         tx: mpsc::Sender<Result<ChatChunk, maix_core::MaixError>>,

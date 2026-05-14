@@ -75,4 +75,6 @@ message TokenUsage {
   uint64 prompt_tokens = 1;
   uint64 completion_tokens = 2;
   uint64 total_tokens = 3;
+  uint64 cache_read_tokens = 4;
+  uint64 cache_write_tokens = 5;
 }

@@ -1,16 +1,7 @@
 # Maix-Agent default configuration.
-# User overrides: ~/.maix/config.toml
+# System config: <exe_dir>/system.toml (server listen addr/port)
+# User config:   ~/.maix/settings.json (providers, agent, memory, tools)
 # Env overrides: MAIX_PROVIDERS_DEEPSEEK_API_KEY etc.
-
-[providers.deepseek]
-api_key = ""
-api_base = "https://api.deepseek.com"
-model = "deepseek-chat"
-
-[providers.minimax]
-api_key = ""
-api_base = "https://api.minimax.chat/v1"
-model = "minimax-m2.5"
 
 [agent]
 max_tool_rounds = 16
@@ -19,11 +10,10 @@ mode = "agent"
 
 [memory]
 dir = ""
-# max_episodic_entries = 500
-
-[server]
-listen_addr = "0.0.0.0"
-listen_port = 26506
 
 [tools]
 shell_enabled = false
+
+[server]
+listen_addr = "127.0.0.1"
+listen_port = 26506

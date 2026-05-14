@@ -19,6 +19,7 @@ service CoreService {
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+  rpc GetSessionMessages(GetSessionMessagesRequest) returns (GetSessionMessagesResponse);
 
   // Chat (bidirectional stream)
   rpc Chat(stream ChatInput) returns (stream ChatOutput);
@@ -61,6 +62,10 @@ service CoreService {
   // Work status
   rpc GetWorkStatus(GetWorkStatusRequest) returns (WorkStatusSnapshot);
   rpc WatchWorkStatus(WatchWorkStatusRequest) returns (stream WorkStatusSnapshot);
+
+  // Config
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
 }
 
 // --------------------------------------------------------------------------
@@ -129,4 +134,43 @@ message ClientInfo {
   string version = 2;
   uint32 pid = 3;
   string hostname = 4;
+}
+
+// --------------------------------------------------------------------------
+// Config
+// --------------------------------------------------------------------------
+message GetConfigRequest {}
+message GetConfigResponse {
+  // Active provider name (e.g. "deepseek")
+  string active_provider = 1;
+  // Model name (e.g. "deepseek-chat")
+  string model = 2;
+  // Provider API base URL (redacted api_key)
+  string api_base = 3;
+  // Server listen address
+  string listen_addr = 4;
+  // Server listen port
+  uint32 listen_port = 5;
+  // Agent config as JSON
+  google.protobuf.Struct agent = 6;
+  // Memory config as JSON
+  google.protobuf.Struct memory = 7;
+  // Tools config as JSON
+  google.protobuf.Struct tools = 8;
+  // All provider names (not their keys)
+  repeated string provider_names = 9;
+}
+
+message UpdateConfigRequest {
+  // Which section to update: "provider", "agent", "memory", "tools"
+  string section = 1;
+  // Key within the section (e.g. provider name, "max_tool_rounds")
+  string key = 2;
+  // New value as JSON
+  google.protobuf.Struct value = 3;
+}
+
+message UpdateConfigResponse {
+  bool success = 1;
+  string message = 2;
 }

@@ -23,9 +23,6 @@ pub struct MaixClient {
 
 impl MaixClient {
     pub async fn connect(addr: &str) -> Result<Self, tonic::transport::Error> {
-        // Auto-launch maix.exe if not running
-        crate::auto_launch::ensure_server_running(addr).await;
-
         let client = CoreServiceClient::connect(format!("http://{addr}")).await?;
         Ok(Self {
             inner: Arc::new(Mutex::new(client)),
@@ -86,6 +83,22 @@ impl MaixClient {
             }))
             .await
             .map(|r| r.into_inner().deleted)
+    }
+
+    pub async fn get_session_messages(
+        &self,
+        session_id: &str,
+        limit: u32,
+    ) -> Result<Vec<pb::SessionMessage>, Status> {
+        self.inner
+            .lock()
+            .await
+            .get_session_messages(Request::new(pb::GetSessionMessagesRequest {
+                session_id: session_id.into(),
+                limit,
+            }))
+            .await
+            .map(|r| r.into_inner().messages)
     }
 
     // -- Chat --
@@ -431,6 +444,37 @@ impl MaixClient {
                 interval_secs,
             }))
             .await
+    }
+
+    /// Get the current server configuration (model, provider, etc.)
+    pub async fn get_config(&self) -> Result<pb::GetConfigResponse, Status> {
+        let resp = self
+            .inner
+            .lock()
+            .await
+            .get_config(Request::new(pb::GetConfigRequest {}))
+            .await?;
+        Ok(resp.into_inner())
+    }
+
+    /// Update a section of the user configuration.
+    pub async fn update_config(
+        &self,
+        section: &str,
+        key: &str,
+        value: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<pb::UpdateConfigResponse, Status> {
+        let resp = self
+            .inner
+            .lock()
+            .await
+            .update_config(Request::new(pb::UpdateConfigRequest {
+                section: section.to_string(),
+                key: key.to_string(),
+                value: Some(crate::json_to_prost_struct(serde_json::Value::Object(value))),
+            }))
+            .await?;
+        Ok(resp.into_inner())
     }
 }
 

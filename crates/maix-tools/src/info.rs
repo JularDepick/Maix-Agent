@@ -24,11 +24,11 @@ pub async fn dir_tree(ctx: &ToolCtx, args: Value) -> ToolResult {
     };
 
     let mut result = Vec::new();
-    walk_dir(&root, &root, &mut result, 0, 3);
+    walk_dir(&root, &mut result, 0, 3);
     result.join("\n")
 }
 
-fn walk_dir(root: &std::path::Path, current: &std::path::Path, out: &mut Vec<String>, depth: usize, max_depth: usize) {
+fn walk_dir(current: &std::path::Path, out: &mut Vec<String>, depth: usize, max_depth: usize) {
     if depth > max_depth {
         return;
     }
@@ -38,7 +38,7 @@ fn walk_dir(root: &std::path::Path, current: &std::path::Path, out: &mut Vec<Str
         let name = entry.file_name().to_string_lossy().into_owned();
         if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             out.push(format!("{indent}{name}/"));
-            walk_dir(root, &entry.path(), out, depth + 1, max_depth);
+            walk_dir(&entry.path(), out, depth + 1, max_depth);
         } else {
             out.push(format!("{indent}{name}"));
         }

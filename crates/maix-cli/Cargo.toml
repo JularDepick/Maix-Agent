@@ -1,6 +1,6 @@
 [package]
 name = "maix-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [[bin]]
@@ -9,6 +9,8 @@ path = "src/main.rs"
 
 [dependencies]
 maix-core.workspace = true
+maix-agent.workspace = true
+reqwest.workspace = true
 clap.workspace = true
 tokio.workspace = true
 tonic.workspace = true
@@ -18,3 +20,4 @@ tracing-subscriber.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid = { version = "1", features = ["v4"] }
+atty = "0.2"

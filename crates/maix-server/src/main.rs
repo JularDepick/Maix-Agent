@@ -1,5 +1,6 @@
 mod chat_stream;
 mod client_launcher;
+mod collaboration;
 mod daemon;
 mod server;
 mod session_manager;
@@ -18,15 +19,19 @@ use server::{MaixCoreService, ServerCore};
 #[derive(Parser, Debug)]
 #[command(name = "maix", version)]
 struct Cli {
+    /// Run in foreground (skip daemonize)
     #[arg(long)]
     foreground: bool,
 
+    /// Unix socket path (overrides config)
     #[arg(long)]
     socket_path: Option<String>,
 
-    #[arg(long, default_value = "127.0.0.1:26506")]
-    tcp_addr: String,
+    /// Listen address for gRPC (overrides config, e.g. "0.0.0.0:26506")
+    #[arg(long)]
+    listen: Option<String>,
 
+    /// Transport mode: auto, tcp, unix-socket, named-pipe
     #[arg(long, default_value = "auto")]
     transport: String,
 }
@@ -52,6 +57,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         maix_core::Config::minimal()
     });
 
+    // Save listen addr before config is moved into ServerCore
+    let config_listen = format!("{}:{}", config.server.listen_addr, config.server.listen_port);
+
     #[cfg_attr(not(unix), allow(unused_variables))]
     let transport_mode = match cli.transport.as_str() {
         "auto" => TransportMode::Auto,
@@ -62,6 +70,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let core = Arc::new(ServerCore::from_config(config).await?);
+
+    // Background task: watch settings.json for changes and reload config
+    {
+        let core = core.clone();
+        tokio::spawn(async move {
+            let settings_path = maix_core::user_settings_path();
+            let mut last_mtime = settings_path
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok();
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                let current_mtime = settings_path
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .ok();
+                if current_mtime != last_mtime {
+                    last_mtime = current_mtime;
+                    tracing::info!("settings.json changed, reloading...");
+                    core.reload_config().await;
+                }
+            }
+        });
+    }
 
     let core_service = CoreServiceServer::new(MaixCoreService(core.clone()));
 
@@ -90,11 +122,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // TCP fallback
-    let addr: std::net::SocketAddr = cli
-        .tcp_addr
+    // TCP fallback: CLI --listen overrides config listen_addr:listen_port
+    let addr_str = cli.listen.unwrap_or(config_listen);
+    let addr: std::net::SocketAddr = addr_str
         .parse()
-        .map_err(|e| format!("invalid tcp address: {e}"))?;
+        .map_err(|e| format!("invalid listen address '{addr_str}': {e}"))?;
     let listener = transport::tcp_listener(addr).await?;
     tracing::info!("listening on tcp: {addr}");
     Server::builder()

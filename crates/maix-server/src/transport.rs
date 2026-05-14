@@ -6,7 +6,6 @@ use std::path::PathBuf;
 /// On Unix: Unix domain socket at `~/.maix/maix.sock`.
 /// On Windows: TCP fallback (Named Pipe support can be added via uds_windows).
 /// Always available: TCP at `127.0.0.1:{port}`.
-
 pub fn default_socket_path() -> PathBuf {
     #[cfg(target_os = "linux")]
     {

@@ -1,7 +1,7 @@
 //! MCP server — expose this agent's tools as MCP resources.
 
 use super::types::*;
-use crate::ToolRegistry;
+use crate::{ToolCtx, ToolRegistry};
 
 /// An MCP server that wraps a ToolRegistry.
 pub struct MCPServer {
@@ -18,10 +18,10 @@ impl MCPServer {
     }
 
     /// Handle an incoming JSON-RPC request string, return response string.
-    pub fn handle_request(&self, request_str: &str, tools: &ToolRegistry) -> String {
+    pub async fn handle_request(&self, request_str: &str, tools: &ToolRegistry, ctx: &ToolCtx) -> String {
         let req: Result<JsonRpcRequest, _> = serde_json::from_str(request_str);
         match req {
-            Ok(req) => self.handle_method(&req.method, req.id, &req.params, tools),
+            Ok(req) => self.handle_method(&req.method, req.id, &req.params, tools, ctx).await,
             Err(_) => {
                 // Maybe it's a notification (no id field)
                 let notif: Result<JsonRpcNotification, _> = serde_json::from_str(request_str);
@@ -34,12 +34,13 @@ impl MCPServer {
         }
     }
 
-    fn handle_method(
+    async fn handle_method(
         &self,
         method: &str,
         id: u64,
         params: &Option<serde_json::Value>,
         tools: &ToolRegistry,
+        ctx: &ToolCtx,
     ) -> String {
         let result = match method {
             "initialize" => {
@@ -75,16 +76,33 @@ impl MCPServer {
                 serde_json::to_value(ListToolsResult { tools: mcp_tools }).ok()
             }
             "tools/call" => {
-                params.as_ref().and_then(|p| {
-                    let call: CallToolParams = serde_json::from_value(p.clone()).ok()?;
-                    Some(serde_json::json!({
-                        "content": [{
-                            "type": "text",
-                            "text": format!("Tool '{}' would be called with args: {} (MCP server mode — pass through to agent)", call.name, call.arguments)
-                        }],
-                        "is_error": false
-                    }))
-                })
+                let call: CallToolParams = match params
+                    .as_ref()
+                    .and_then(|p| serde_json::from_value(p.clone()).ok())
+                {
+                    Some(c) => c,
+                    None => {
+                        return serde_json::to_string(&JsonRpcResponse::err(
+                            id,
+                            -32602,
+                            "Invalid params",
+                        ))
+                        .unwrap_or_default();
+                    }
+                };
+
+                match tools.execute(&call.name, ctx, call.arguments).await {
+                    Ok(result) => serde_json::to_value(CallToolResult {
+                        content: vec![ToolContent::Text { text: result }],
+                        is_error: None,
+                    })
+                    .ok(),
+                    Err(e) => serde_json::to_value(CallToolResult {
+                        content: vec![ToolContent::Text { text: format!("Error: {e}") }],
+                        is_error: Some(true),
+                    })
+                    .ok(),
+                }
             }
             _ => None,
         };

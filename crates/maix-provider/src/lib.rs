@@ -1,10 +1,11 @@
 //! LLM Provider abstraction layer.
-//!
-//! Supports any OpenAI-compatible API (DeepSeek, MiniMax, OpenAI, etc.).
 //! Key types: [`LLMProvider`] trait, [`OpenAICompatProvider`], [`ProviderRegistry`].
 
 pub mod anthropic;
+pub mod cache;
+pub mod chain;
 mod openai_compat;
+pub mod rate_limiter;
 mod registry;
 pub mod stream;
 mod traits;
@@ -35,6 +36,10 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// Override the model for this request (auto-mode routing).
+    /// When set, takes precedence over the provider's default model.
+    #[serde(skip_serializing)]
+    pub model_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

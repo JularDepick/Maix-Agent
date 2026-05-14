@@ -2,7 +2,9 @@
 
 pub mod compaction;
 pub mod embedding;
+pub mod importance;
 pub mod retrieval;
+pub mod semantic;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -134,21 +136,36 @@ impl FileMemoryStore {
         Ok(())
     }
 
-    /// Simple keyword-based search (v1 — replaced by vector search in Phase 2).
+    /// BM25-like keyword scoring (upgraded from simple substring match).
     fn keyword_score(entry: &MemoryEntry, query: &str) -> f32 {
-        let query_lower = query.to_lowercase();
         let content_lower = entry.content.to_lowercase();
+        let query_lower = query.to_lowercase();
         let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
+        let content_len = content_lower.len() as f32;
+        if content_len < 1.0 {
+            return 0.0;
+        }
 
+        let avg_dl = 200.0_f32;
+        let k1 = 1.2_f32;
+        let b = 0.75_f32;
         let mut score = 0.0_f32;
+
         for term in &query_terms {
-            if content_lower.contains(term) {
-                score += 1.0;
+            let tf = content_lower.matches(term).count() as f32;
+            if tf > 0.0 {
+                let numerator = tf * (k1 + 1.0);
+                let denominator = tf + k1 * (1.0 - b + b * content_len / avg_dl);
+                score += numerator / denominator;
             }
         }
-        // Boost by importance and recency
-        score *= entry.importance;
-        score
+
+        // Normalize and boost by importance and recency
+        let bm25 = (score / (score + 1.0)).min(1.0);
+        let days_old = (chrono::Utc::now() - entry.created_at).num_hours() as f32 / 24.0;
+        let time_score = 0.5_f32.powf(days_old / 30.0);
+
+        0.60 * bm25 + 0.20 * entry.importance + 0.20 * time_score
     }
 }
 
@@ -269,7 +286,7 @@ impl MemoryStore for FileMemoryStore {
         for entries in self.episodic.values() {
             all.extend(entries.clone());
         }
-        all.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        all.sort_by_key(|e| std::cmp::Reverse(e.created_at));
         Ok(all)
     }
 }
@@ -342,13 +359,31 @@ impl MemoryStore for SqliteMemoryStore {
 
     async fn get_context_for_session(&self, session_id: &str, max_tokens: usize) -> MaixResult<String> {
         let db = self.db.lock().unwrap();
-        let rows = db
-            .list_memories(None, 50)
-            .map_err(|e| maix_core::MaixError::Memory(format!("list memories: {e}")))?;
-        let mut parts: Vec<String> = Vec::new();
-        let mut char_count = 0;
         let char_limit = max_tokens * 3;
-        for row in rows {
+        let mut parts: Vec<String> = Vec::new();
+        let mut char_count = 0usize;
+
+        // Session-specific episodic memories
+        let session_rows = db
+            .search_memories_by_session(session_id, "episodic", 20)
+            .map_err(|e| maix_core::MaixError::Memory(format!("search session memories: {e}")))?;
+        for row in &session_rows {
+            let text = format!("[History] {}", row.content);
+            if char_count + text.len() > char_limit {
+                break;
+            }
+            char_count += text.len();
+            parts.push(text);
+        }
+
+        // Global semantic memories (high importance)
+        let semantic_rows = db
+            .list_memories(Some("semantic"), 20)
+            .map_err(|e| maix_core::MaixError::Memory(format!("list semantic: {e}")))?;
+        for row in &semantic_rows {
+            if row.importance < 0.5 {
+                continue;
+            }
             let text = format!("[Memory: {}] {}", row.id, row.content);
             if char_count + text.len() > char_limit {
                 break;
@@ -356,7 +391,7 @@ impl MemoryStore for SqliteMemoryStore {
             char_count += text.len();
             parts.push(text);
         }
-        let _ = session_id;
+
         Ok(parts.join("\n"))
     }
 

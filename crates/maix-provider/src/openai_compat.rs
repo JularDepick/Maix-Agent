@@ -1,7 +1,8 @@
 use super::{ChatRequest, ChatResponse, ChatStream, LLMProvider, ProviderCapabilities};
+use super::rate_limiter::{RateLimiter, RetryConfig};
 use async_trait::async_trait;
 use maix_core::MaixResult;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 /// Global shared HTTP client with connection pooling.
@@ -19,9 +20,7 @@ pub fn global_http_client() -> &'static reqwest::Client {
 }
 
 /// A provider that speaks the OpenAI `/v1/chat/completions` protocol.
-///
-/// Works with DeepSeek, MiniMax, OpenAI, and any compatible API.
-/// Differences are handled via `extra_headers` and `extra_body`.
+/// Works with any compatible API.
 pub struct OpenAICompatProvider {
     client: reqwest::Client,
     api_base: String,
@@ -32,6 +31,10 @@ pub struct OpenAICompatProvider {
     /// Extra fields merged into the JSON body of every request.
     extra_body: serde_json::Map<String, serde_json::Value>,
     capabilities: ProviderCapabilities,
+    /// Rate limiter (optional).
+    rate_limiter: Option<Arc<RateLimiter>>,
+    /// Retry configuration.
+    retry_config: RetryConfig,
 }
 
 impl OpenAICompatProvider {
@@ -49,7 +52,21 @@ impl OpenAICompatProvider {
             extra_headers: Vec::new(),
             extra_body: Default::default(),
             capabilities: ProviderCapabilities::default(),
+            rate_limiter: None,
+            retry_config: RetryConfig::default(),
         }
+    }
+
+    /// Enable rate limiting.
+    pub fn with_rate_limit(mut self, requests_per_minute: u32) -> Self {
+        self.rate_limiter = Some(Arc::new(RateLimiter::new(requests_per_minute)));
+        self
+    }
+
+    /// Set retry configuration.
+    pub fn with_retry_config(mut self, config: RetryConfig) -> Self {
+        self.retry_config = config;
+        self
     }
 
     /// Set the context window size.
@@ -59,7 +76,7 @@ impl OpenAICompatProvider {
         self
     }
 
-    /// Enable reasoning support (DeepSeek V4 thinking mode).
+    /// Enable reasoning support.
     pub fn with_reasoning(mut self) -> Self {
         self.capabilities.supports_reasoning = true;
         self
@@ -98,7 +115,9 @@ impl OpenAICompatProvider {
     fn build_body(&self, req: &ChatRequest, stream: bool) -> serde_json::Value {
         let mut body = serde_json::to_value(req).unwrap_or_default();
         if let Some(obj) = body.as_object_mut() {
-            obj.insert("model".into(), self.model.clone().into());
+            // Use model override from request if set, otherwise use provider default
+            let model = req.model_override.as_deref().unwrap_or(&self.model);
+            obj.insert("model".into(), model.into());
             obj.insert("stream".into(), stream.into());
             for (k, v) in &self.extra_body {
                 obj.insert(k.clone(), v.clone());

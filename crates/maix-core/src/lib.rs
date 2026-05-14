@@ -4,14 +4,23 @@ pub mod architecture;
 pub mod auto_launch;
 pub mod client;
 pub mod config;
+pub mod config_validator;
 pub mod conversions;
 pub mod credentials;
 pub mod error;
+pub mod events;
+pub mod health;
+pub mod i18n;
 pub mod identity;
+pub mod logging;
 pub mod model_router;
+pub mod notify;
+pub mod perf;
 pub mod permissions;
+pub mod tokenizer;
 pub mod traits;
 pub mod types;
+pub mod update;
 pub mod util;
 
 pub mod proto {
@@ -32,8 +41,8 @@ pub mod proto {
 pub use architecture::{Architecture, TopologyType};
 pub use auto_launch::ensure_server_running;
 pub use client::{start_chat, ChatHandle, MaixClient};
-pub use config::{Config, TransportMode};
-pub use conversions::{json_to_prost_struct, prost_struct_to_json};
+pub use config::{AgentConfig, Config, MemoryConfig, ToolsConfig, TransportMode, UserSettings, system_config_path, user_settings_path};
+pub use conversions::{json_to_prost_struct, prost_struct_to_json, prost_value_to_json};
 pub use credentials::{resolve_api_base, resolve_api_key};
 pub use error::MaixError;
 pub use identity::{Identity, IdentityManager};

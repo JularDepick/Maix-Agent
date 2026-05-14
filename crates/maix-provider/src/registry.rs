@@ -7,8 +7,8 @@ use std::sync::Arc;
 ///
 /// ```ignore
 /// let mut reg = ProviderRegistry::new();
-/// reg.insert("deepseek", deepseek_provider);
-/// let p = reg.get("deepseek")?;
+/// reg.insert("my-provider", provider);
+/// let p = reg.get("my-provider")?;
 /// ```
 #[derive(Default)]
 pub struct ProviderRegistry {
@@ -122,16 +122,16 @@ mod tests {
         };
 
         let provider = OpenAICompatProvider::new(
-            "https://api.deepseek.com".into(),
+            "https://api.example.com".into(),
             "sk-test".into(),
-            "deepseek-chat".into(),
+            "test-model".into(),
         )
         .with_context_window(1_000_000)
         .with_reasoning()
         .with_capabilities(caps)
         .with_header("X-Custom", "value");
 
-        assert_eq!(provider.model_name(), "deepseek-chat");
+        assert_eq!(provider.model_name(), "test-model");
         assert_eq!(provider.context_window(), 1_000_000);
         assert!(provider.capabilities().supports_reasoning);
     }

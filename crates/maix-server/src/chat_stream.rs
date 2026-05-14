@@ -81,6 +81,8 @@ fn pb_usage(u: TokenUsage) -> maix_core::proto::maix::common::v1::TokenUsage {
         prompt_tokens: u.prompt_tokens,
         completion_tokens: u.completion_tokens,
         total_tokens: u.total_tokens,
+        cache_read_tokens: u.cache_read_tokens,
+        cache_write_tokens: u.cache_write_tokens,
     }
 }
 

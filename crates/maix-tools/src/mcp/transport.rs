@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! MCP transport layer — stdio, SSE, streamable HTTP.
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

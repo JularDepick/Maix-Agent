@@ -17,13 +17,13 @@
 ## 架构
 
 ```
-maix_agent::Maix  (核心调度器)
-  ├── maix.exe          CLI驱动（自给自足）
-  ├── maix-tui.exe      TUI驱动（用户交互）
-  └── maix-gateway.exe  HTTP驱动（REST/SSE/WebSocket）
+maix.exe  (核心引擎，gRPC Server，守护进程)
+  ├── maix-cli.exe      CLI客户端（无状态，gRPC）
+  ├── maix-tui.exe      TUI客户端（交互式，gRPC）
+  └── maix-gateway.exe  HTTP网关（REST/SSE/WS，gRPC）
 ```
 
-核心调度器 `Maix` 位于 `maix-agent`。三个入口点均为薄封装 — TUI和Gateway不拥有Agent调度逻辑。
+核心引擎 `maix.exe` 以守护进程运行。所有客户端无状态，通过 gRPC 通信。
 
 ## 功能支持
 - 单Agent操作本地工具（fs_read、fs_write、shell_exec、web_fetch）
@@ -95,12 +95,11 @@ maix-gateway
 | `maix-task-queue` | 领域层 | 优先级/依赖/位置队列，支持DB持久化 |
 | `maix-skills` | 领域层 | 技能加载/安装/启用，TOML + Markdown双格式 |
 | `maix-monitor` | 领域层 | EventBus（256通道）、Monitor、AgentEvent追踪 |
-| `maix-agent` | 应用层 | 单Agent循环 + `Maix` facade（核心调度器） |
-| `maix-multi-agent` | 应用层 | 多Agent编排器（3种模式） |
-| `maix-cli` | 入口 | CLI（maix.exe），基于Maix的薄驱动 |
-| `maix-tui` | 入口 | TUI（maix-tui.exe），配置向导，基于Maix的薄驱动 |
-| `maix-gateway` | 入口 | HTTP网关（maix-gateway.exe），30+端点，基于Maix的薄驱动 |
-| `maix-server` | 遗留 | （已被maix-gateway取代） |
+| `maix-agent` | 应用层 | Agent运行时 + 多Agent编排 |
+| `maix-cli` | 客户端 | CLI客户端，gRPC Client |
+| `maix-tui` | 客户端 | TUI终端界面，gRPC Client |
+| `maix-gateway` | 客户端 | HTTP网关，gRPC → HTTP 转换 |
+| `maix-server` | 核心引擎 | maix.exe 守护进程，gRPC Server |
 
 ## 技术栈
 | 组件 | 技术 |
@@ -117,29 +116,31 @@ maix-gateway
 ## 项目结构
 ```
 maix-agent/
-├── crates/              # 14个工作区crates
+├── crates/              # 13个工作区crates
 ├── config/              # default.toml
+├── proto/               # Protobuf协议定义
 ├── Cargo.toml           # 工作区根配置
 ├── Cargo.lock
 ├── Dockerfile
 ├── README.md            # 英文README
-├── README_zh-CN.md      # 中文README（本文件）
-├── README.ai.md         # AI可读清单（英文）
-├── README_zh-CN.ai.md   # AI可读清单（中文）
-└── Construction.md      # 架构图与变更记录
+└── README_zh-CN.md      # 中文README（本文件）
 ```
 
 ## 名称来源
 `Maix` = `Max` + `Mix`，寓意「最大记忆能力」和「混合型架构」。
 
 ## 许可证
-- **AGPL-3.0-or-later** 用于开源使用。详见 [LICENSE](./LICENSE)
-- **商业闭源授权** 可用。详见 [COMMERCIAL.md](./COMMERCIAL.md)
+- **AGPL-3.0-or-later** 用于开源使用。详见 [[LICENSE]](./LICENSE)
+- **商业闭源授权** 可用。详见 [[COMMERCIAL.md]](./COMMERCIAL.md)
 
 ## 链接
-- [报告漏洞和提出期望](https://github.com/JularDepick/Maix-Agent/issues)
-- [申请商用闭源](./COMMERCIAL.md)
+- [[报告漏洞和提出期望]](https://github.com/JularDepick/Maix-Agent/issues)
+- [[申请商用闭源]](./COMMERCIAL.md)
 
 ## 致谢
-- [DeepSeek-TUI](https://github.com/Hmbown/DeepSeek-TUI)
-- [OpenHanako](https://github.com/liliMozi/openhanako)
+- 感谢开源社区项目 [[DeepSeek-TUI]](https://github.com/Hmbown/DeepSeek-TUI) 和 [[OpenHanako]](https://github.com/liliMozi/openhanako) 为本项目提供了实现思路和参考规范。
+- 感谢 [[小米 MiMo-V2.5 系列开源 & Orbit 百万亿 Token 计划]]() 为本项目提供共计 **1600M TOKEN** 的大模型API服务赞助支持
+  <img src="./.github/image/MiMo-V2.5-API-Support.png"/>
+- 感谢 [[DeepSeek开放平台]](https://platform.deepseek.com) 为本项目提供低价高质的大模型API服务支持
+  <img src="./.github/image/DeepSeek-API-Support.png" width="50%"/>
+- 感谢 [[Claude Code]](https://code.claude.com) 为本项目提供 AI Agent 编程支持

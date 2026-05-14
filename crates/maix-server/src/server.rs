@@ -10,9 +10,10 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status, Streaming};
 
 use maix_agent::{Agent, AgentConfig, AgentEvent};
+use maix_agent::orchestrator::{Orchestrator, AgentRole, OrchestrationMode};
 use maix_core::proto::maix::core::v1::core_service_server::CoreService;
 use maix_core::proto::maix::core::v1 as pb;
-use maix_core::{json_to_prost_struct, prost_struct_to_json, Architecture, Config, IdentityManager};
+use maix_core::{json_to_prost_struct, prost_struct_to_json, prost_value_to_json, Architecture, Config, IdentityManager};
 use maix_memory::{FileMemoryStore, MemoryStore, SharedMemoryProxy};
 use maix_monitor::{EventBus, Monitor};
 use maix_provider::LLMProvider;
@@ -30,9 +31,8 @@ const MAX_CONCURRENT_REQUESTS: usize = 256;
 // ---------------------------------------------------------------------------
 
 pub struct ServerCore {
-    #[allow(dead_code)]
-    pub config: Config,
-    pub provider: Arc<dyn LLMProvider>,
+    pub config: Arc<RwLock<Config>>,
+    pub provider: Arc<RwLock<Arc<dyn LLMProvider>>>,
     pub event_bus: Arc<EventBus>,
     pub monitor: Arc<RwLock<Monitor>>,
     pub memory: Arc<RwLock<Box<dyn MemoryStore>>>,
@@ -42,6 +42,7 @@ pub struct ServerCore {
     pub identities: RwLock<IdentityManager>,
     pub architectures: RwLock<Vec<Architecture>>,
     pub sessions: SessionStore,
+    pub db: Arc<tokio::sync::Mutex<maix_db::Database>>,
     pub cancel_root: CancellationToken,
     pub start_time: Instant,
     pub semaphore: Semaphore,
@@ -49,28 +50,64 @@ pub struct ServerCore {
 }
 
 impl ServerCore {
+    /// Reload config from disk and update provider if changed.
+    pub async fn reload_config(&self) {
+        let new_config = match Config::load() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("failed to reload config: {e}");
+                return;
+            }
+        };
+
+        let old_config = self.config.read().await;
+        let changed = old_config.api_key != new_config.api_key
+            || old_config.api_base != new_config.api_base
+            || old_config.model != new_config.model
+            || old_config.provider != new_config.provider;
+        drop(old_config);
+
+        if !changed {
+            return;
+        }
+
+        tracing::info!("settings.json changed, reloading provider");
+
+        let api_key = new_config.api_key.clone();
+        if api_key.is_empty() {
+            tracing::warn!("API key is empty after reload");
+        }
+
+        let new_provider: Arc<dyn LLMProvider> = Arc::new(
+            maix_provider::OpenAICompatProvider::new(
+                new_config.api_base.clone(),
+                api_key,
+                new_config.model.clone(),
+            )
+            .with_context_window(1_000_000),
+        );
+
+        *self.config.write().await = new_config;
+        *self.provider.write().await = new_provider;
+        tracing::info!("provider reloaded successfully");
+    }
+}
+
+impl ServerCore {
     pub async fn from_config(config: Config) -> Result<Self, Box<dyn std::error::Error>> {
         let provider: Arc<dyn LLMProvider> = {
-            let default = config
-                .providers
-                .iter()
-                .find(|(_, pc)| !pc.api_key.is_empty())
-                .map(|(k, _)| k.clone())
-                .or_else(|| config.providers.keys().next().cloned())
-                .unwrap_or_else(|| "deepseek".into());
-            let pc = config.providers.get(&default);
-            let api_key = pc.map(|p| p.api_key.clone()).unwrap_or_default();
-            let api_base = pc
-                .map(|p| p.api_base.clone())
-                .unwrap_or_else(|| "https://api.deepseek.com".into());
-            let model = pc
-                .and_then(|p| p.model.clone())
-                .unwrap_or_else(|| default.clone());
-            let mut p = maix_provider::OpenAICompatProvider::new(api_base, api_key, model)
-                .with_context_window(1_000_000);
-            if default.contains("deepseek") {
-                p = p.with_reasoning();
+            let api_key = config.api_key.clone();
+            if api_key.is_empty() {
+                tracing::warn!(
+                    "API key not set. Configure in ~/.maix/settings.json or set MAIX_API_KEY env var"
+                );
             }
+            let api_base = config.api_base.clone();
+            let model = config.model.clone();
+            let provider_name = config.provider.clone();
+            tracing::info!("provider='{}' model='{}' api_base='{}'", provider_name, model, api_base);
+            let p = maix_provider::OpenAICompatProvider::new(api_base, api_key, model)
+                .with_context_window(1_000_000);
             Arc::new(p)
         };
 
@@ -110,14 +147,37 @@ impl ServerCore {
             .join("skills");
         let skills = Arc::new(RwLock::new(SkillRegistry::new(skills_dir)));
 
+        // Open SQLite database
+        let db_path = maix_core::config::default_memory_dir()
+            .parent()
+            .unwrap_or(&std::path::PathBuf::from("."))
+            .join("maix.db");
+        let db = maix_db::Database::open(&db_path)
+            .map_err(|e| format!("failed to open database at {}: {e}", db_path.display()))?;
+
+        // Load persisted tasks into the queue
+        let mut queue = TaskQueue::new();
+        if let Ok(count) = queue.load_from_db(&db) {
+            if count > 0 {
+                tracing::info!("loaded {count} tasks from database");
+            }
+        }
+
+        // Register MCP tools from config
+        let mut tools = ToolRegistry::with_builtins();
+        let mcp_configs = config.tools.mcp_servers.clone();
+        if !mcp_configs.is_empty() {
+            tools.register_mcp_tools(&mcp_configs).await;
+        }
+
         Ok(Self {
-            config,
-            provider,
+            config: Arc::new(RwLock::new(config)),
+            provider: Arc::new(RwLock::new(provider)),
             event_bus,
             monitor,
             memory,
-            tools: Arc::new(ToolRegistry::with_builtins()),
-            queue: Arc::new(RwLock::new(TaskQueue::new())),
+            tools: Arc::new(tools),
+            queue: Arc::new(RwLock::new(queue)),
             skills,
             identities: RwLock::new(IdentityManager::new().with_defaults()),
             architectures: RwLock::new(vec![
@@ -126,6 +186,7 @@ impl ServerCore {
                 Architecture::router("router"),
             ]),
             sessions: SessionStore::new(),
+            db: Arc::new(tokio::sync::Mutex::new(db)),
             cancel_root: CancellationToken::new(),
             start_time: Instant::now(),
             semaphore: Semaphore::new(MAX_CONCURRENT_REQUESTS),
@@ -135,9 +196,10 @@ impl ServerCore {
 
     pub async fn build_agent(&self, session_id: &str, workdir: std::path::PathBuf) -> Agent {
         let memory_proxy = SharedMemoryProxy::new(self.memory.clone());
+        let provider = self.provider.read().await.clone();
         Agent::new(
             AgentConfig::default(),
-            self.provider.clone(),
+            provider,
             self.tools.clone(),
             Box::new(memory_proxy),
             session_id.to_string(),
@@ -199,6 +261,16 @@ impl CoreService for MaixCoreService {
         // Increment message count for the first user message
         self.0.sessions.increment_message_count(&session_id).await;
 
+        // Persist user message to DB
+        {
+            let db = self.0.db.lock().await;
+            // Ensure session exists in DB (for auto-created sessions in chat handler)
+            let _ = db.create_session(&session_id, &session_id);
+            if let Err(e) = db.insert_message(&session_id, "user", &text, None, 0) {
+                tracing::warn!("failed to persist user message: {e}");
+            }
+        }
+
         // Take agent from slot
         let agent = {
             let mut lock = handle.agent.lock().await;
@@ -235,6 +307,7 @@ impl CoreService for MaixCoreService {
         let out_sid = sid.clone();
         let out_cancel = cancel.clone();
         let out_bus = self.0.event_bus.clone();
+        let out_db = self.0.db.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -242,13 +315,20 @@ impl CoreService for MaixCoreService {
                         match event {
                             Some(e) => {
                                 // Emit TokenUsed to event bus for monitor tracking
-                                if let AgentEvent::ResponseComplete { ref usage, .. } = &e {
+                                if let AgentEvent::ResponseComplete { ref text, ref usage } = &e {
                                     let _ = out_bus.sender().send(maix_monitor::AgentEvent::TokenUsed {
                                         agent_id: out_sid.clone(),
                                         prompt_tokens: usage.prompt_tokens,
                                         completion_tokens: usage.completion_tokens,
                                         cost_estimate: 0.0,
                                     });
+                                    // Persist assistant message to DB
+                                    let token_count = usage.total_tokens;
+                                    if let Err(e) = out_db.lock().await.insert_message(
+                                        &out_sid, "assistant", text, None, token_count,
+                                    ) {
+                                        tracing::warn!("failed to persist assistant message: {e}");
+                                    }
                                 }
                                 let msg = agent_event_to_chat_output(&out_sid, e);
                                 if out_tx_clone.send(Ok(msg)).await.is_err() {
@@ -388,7 +468,7 @@ impl CoreService for MaixCoreService {
         let now = chrono::Utc::now().to_rfc3339();
         let meta = SessionMeta {
             id: session_id.clone(),
-            name,
+            name: name.clone(),
             created_at: now.clone(),
             updated_at: now,
             message_count: 0,
@@ -399,6 +479,12 @@ impl CoreService for MaixCoreService {
             cancel: CancellationToken::new(),
         };
         self.0.sessions.insert(session_id.clone(), handle).await;
+
+        // Persist to SQLite
+        if let Err(e) = self.0.db.lock().await.create_session(&session_id, &name) {
+            tracing::warn!("failed to persist session to DB: {e}");
+        }
+
         Ok(Response::new(pb::CreateSessionResponse { session_id }))
     }
 
@@ -429,7 +515,33 @@ impl CoreService for MaixCoreService {
     ) -> Result<Response<pb::DeleteSessionResponse>, Status> {
         let req = request.into_inner();
         let deleted = self.0.sessions.remove(&req.session_id).await.is_some();
+        // Also delete from DB (messages cascade-delete via FK)
+        if let Err(e) = self.0.db.lock().await.delete_session(&req.session_id) {
+            tracing::warn!("failed to delete session from DB: {e}");
+        }
         Ok(Response::new(pb::DeleteSessionResponse { deleted }))
+    }
+
+    async fn get_session_messages(
+        &self,
+        request: Request<pb::GetSessionMessagesRequest>,
+    ) -> Result<Response<pb::GetSessionMessagesResponse>, Status> {
+        let req = request.into_inner();
+        let limit = if req.limit == 0 { 100 } else { req.limit as usize };
+        let db = self.0.db.lock().await;
+        let rows = db
+            .list_messages(&req.session_id, Some(limit))
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let messages = rows
+            .into_iter()
+            .map(|r| pb::SessionMessage {
+                role: r.role,
+                content: r.content,
+                token_count: r.token_count as u64,
+                created_at: r.created_at,
+            })
+            .collect();
+        Ok(Response::new(pb::GetSessionMessagesResponse { messages }))
     }
 
     // ---- Agent management ----
@@ -515,6 +627,7 @@ impl CoreService for MaixCoreService {
             } else {
                 std::path::PathBuf::from(req.working_dir)
             },
+            ask_user_tx: None,
         };
         let start = std::time::Instant::now();
         match self.0.tools.get(&req.tool_name) {
@@ -637,7 +750,21 @@ impl CoreService for MaixCoreService {
             created_at: std::time::Instant::now(),
         };
         let task_id = task.id.clone();
+        let depends_json = serde_json::to_string(&task.depends_on).unwrap_or_else(|_| "[]".into());
         self.0.queue.write().await.enqueue(task);
+
+        // Persist to SQLite
+        if let Err(e) = self.0.db.lock().await.insert_task(
+            &task_id,
+            &req.description,
+            &req.input,
+            req.priority as u8,
+            &depends_json,
+            3,
+        ) {
+            tracing::warn!("failed to persist task to DB: {e}");
+        }
+
         Ok(Response::new(pb::SubmitTaskResponse { task_id }))
     }
 
@@ -678,6 +805,12 @@ impl CoreService for MaixCoreService {
     ) -> Result<Response<pb::CancelTaskResponse>, Status> {
         let req = request.into_inner();
         let cancelled = self.0.queue.write().await.cancel(&req.task_id).is_some();
+        if cancelled {
+            // Remove from DB
+            if let Err(e) = self.0.db.lock().await.delete_task(&req.task_id) {
+                tracing::warn!("failed to delete task from DB: {e}");
+            }
+        }
         Ok(Response::new(pb::CancelTaskResponse { cancelled }))
     }
 
@@ -702,6 +835,11 @@ impl CoreService for MaixCoreService {
     ) -> Result<Response<pb::SuspendTaskResponse>, Status> {
         let req = request.into_inner();
         let suspended = self.0.queue.write().await.suspend(&req.task_id).is_ok();
+        if suspended {
+            if let Err(e) = self.0.db.lock().await.update_task_status(&req.task_id, "Suspended", None) {
+                tracing::warn!("failed to update task status in DB: {e}");
+            }
+        }
         Ok(Response::new(pb::SuspendTaskResponse { suspended }))
     }
 
@@ -721,6 +859,11 @@ impl CoreService for MaixCoreService {
             .await
             .resume(&req.task_id, position)
             .is_ok();
+        if resumed {
+            if let Err(e) = self.0.db.lock().await.update_task_status(&req.task_id, "Pending", None) {
+                tracing::warn!("failed to update task status in DB: {e}");
+            }
+        }
         Ok(Response::new(pb::ResumeTaskResponse { resumed }))
     }
 
@@ -826,34 +969,10 @@ impl CoreService for MaixCoreService {
         let arch = architectures.iter().find(|a| a.name == req.name).cloned();
         drop(architectures);
 
-        let (tx, rx) = mpsc::channel(16);
-        match arch {
-            Some(a) => {
-                if let Err(e) = a.validate() {
-                    let _ = tx
-                        .send(Ok(pb::RunArchitectureOutput {
-                            node_id: "system".into(),
-                            role: "orchestrator".into(),
-                            output: Some(pb::run_architecture_output::Output::Error(format!(
-                                "{e:?}"
-                            ))),
-                        }))
-                        .await;
-                } else {
-                    let _ = tx
-                        .send(Ok(pb::RunArchitectureOutput {
-                            node_id: "system".into(),
-                            role: "orchestrator".into(),
-                            output: Some(pb::run_architecture_output::Output::Complete(
-                                format!(
-                                    "Architecture '{}' accepted; execution deferred",
-                                    a.name
-                                ),
-                            )),
-                        }))
-                        .await;
-                }
-            }
+        let (tx, rx) = mpsc::channel(64);
+
+        let arch = match arch {
+            Some(a) => a,
             None => {
                 let _ = tx
                     .send(Ok(pb::RunArchitectureOutput {
@@ -865,8 +984,107 @@ impl CoreService for MaixCoreService {
                         ))),
                     }))
                     .await;
+                return Ok(Response::new(Box::pin(ReceiverStream::new(rx))));
             }
+        };
+
+        if let Err(e) = arch.validate() {
+            let _ = tx
+                .send(Ok(pb::RunArchitectureOutput {
+                    node_id: "system".into(),
+                    role: "orchestrator".into(),
+                    output: Some(pb::run_architecture_output::Output::Error(format!("{e:?}"))),
+                }))
+                .await;
+            return Ok(Response::new(Box::pin(ReceiverStream::new(rx))));
         }
+
+        // Map topology to orchestration mode
+        let mode = match arch.detect_topology() {
+            maix_core::TopologyType::Debate => OrchestrationMode::Debate,
+            maix_core::TopologyType::Router | maix_core::TopologyType::Parallel => {
+                OrchestrationMode::Collaborative
+            }
+            _ => OrchestrationMode::Hierarchical,
+        };
+
+        let provider = self.0.provider.read().await.clone();
+        let working_dir = std::env::current_dir().unwrap_or_default();
+        let input = req.input.clone();
+
+        // Spawn execution so the stream starts immediately
+        tokio::spawn(async move {
+            let mut orch = Orchestrator::new(mode);
+
+            // Register each architecture node as an agent
+            for node in &arch.nodes {
+                let role = AgentRole {
+                    name: node.id.clone(),
+                    system_prompt: node.system_prompt.clone(),
+                    tools: node.tools.clone(),
+                    model: node.model.clone(),
+                    max_iter: node.max_iterations.unwrap_or(10),
+                    auto_approve: true,
+                };
+                orch.add_agent(provider.clone(), role, working_dir.clone());
+            }
+
+            // Notify: execution started
+            let _ = tx
+                .send(Ok(pb::RunArchitectureOutput {
+                    node_id: "system".into(),
+                    role: "orchestrator".into(),
+                    output: Some(pb::run_architecture_output::Output::TextDelta(format!(
+                        "Running architecture '{}' with {} nodes (mode: {:?})",
+                        arch.name,
+                        arch.nodes.len(),
+                        orch.mode,
+                    ))),
+                }))
+                .await;
+
+            // Submit the task
+            let task_id = orch.submit(&arch.name, &input, 10, None);
+
+            // Run orchestrator tick loop
+            loop {
+                let results = orch.tick().await;
+                if results.is_empty() {
+                    break;
+                }
+                for result in &results {
+                    let _ = tx
+                        .send(Ok(pb::RunArchitectureOutput {
+                            node_id: result.agent_id.clone(),
+                            role: arch
+                                .nodes
+                                .iter()
+                                .find(|n| n.id == result.agent_id)
+                                .map(|n| n.role.clone())
+                                .unwrap_or_default(),
+                            output: Some(if result.success {
+                                pb::run_architecture_output::Output::Complete(result.output.clone())
+                            } else {
+                                pb::run_architecture_output::Output::Error(result.output.clone())
+                            }),
+                        }))
+                        .await;
+                }
+            }
+
+            // Final complete
+            let _ = tx
+                .send(Ok(pb::RunArchitectureOutput {
+                    node_id: "system".into(),
+                    role: "orchestrator".into(),
+                    output: Some(pb::run_architecture_output::Output::Complete(format!(
+                        "Architecture '{}' execution complete (task: {task_id})",
+                        arch.name,
+                    ))),
+                }))
+                .await;
+        });
+
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 
@@ -995,6 +1213,110 @@ impl CoreService for MaixCoreService {
             }
         });
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
+    }
+
+    async fn get_config(
+        &self,
+        _request: Request<pb::GetConfigRequest>,
+    ) -> Result<Response<pb::GetConfigResponse>, Status> {
+        let cfg = self.0.config.read().await;
+
+        let agent_json = json_to_prost_struct(serde_json::to_value(&cfg.agent).unwrap_or_default());
+        let memory_json = json_to_prost_struct(serde_json::to_value(&cfg.memory).unwrap_or_default());
+        let tools_json = json_to_prost_struct(serde_json::to_value(&cfg.tools).unwrap_or_default());
+
+        Ok(Response::new(pb::GetConfigResponse {
+            active_provider: cfg.provider.clone(),
+            model: cfg.model.clone(),
+            api_base: cfg.api_base.clone(),
+            listen_addr: cfg.server.listen_addr.clone(),
+            listen_port: cfg.server.listen_port as u32,
+            agent: Some(agent_json),
+            memory: Some(memory_json),
+            tools: Some(tools_json),
+            provider_names: vec![cfg.provider.clone()],
+        }))
+    }
+
+    async fn update_config(
+        &self,
+        request: Request<pb::UpdateConfigRequest>,
+    ) -> Result<Response<pb::UpdateConfigResponse>, Status> {
+        let req = request.into_inner();
+
+        // Load current user settings
+        let settings_path = maix_core::user_settings_path();
+        let mut settings: maix_core::UserSettings = if settings_path.exists() {
+            let content = std::fs::read_to_string(&settings_path)
+                .map_err(|e| Status::internal(format!("failed to read settings: {e}")))?;
+            serde_json::from_str(&content)
+                .map_err(|e| Status::internal(format!("failed to parse settings: {e}")))?
+        } else {
+            maix_core::UserSettings::default()
+        };
+
+        let value_map: serde_json::Map<String, serde_json::Value> = req
+            .value
+            .map(|s| s.fields.into_iter().map(|(k, v)| (k, prost_value_to_json(v))).collect())
+            .unwrap_or_default();
+
+        match req.section.as_str() {
+            "provider" => {
+                if let Some(v) = value_map.get("api_key").and_then(|v| v.as_str()) {
+                    settings.api_key = v.to_string();
+                }
+                if let Some(v) = value_map.get("api_base").and_then(|v| v.as_str()) {
+                    settings.api_base = v.to_string();
+                }
+                if let Some(v) = value_map.get("model").and_then(|v| v.as_str()) {
+                    settings.model = v.to_string();
+                }
+                if let Some(v) = value_map.get("provider").and_then(|v| v.as_str()) {
+                    settings.provider = v.to_string();
+                }
+            }
+            "agent" => {
+                if let Ok(val) = serde_json::from_value::<maix_core::AgentConfig>(
+                    serde_json::Value::Object(value_map),
+                )
+                {
+                    settings.agent = val;
+                }
+            }
+            "memory" => {
+                if let Ok(val) = serde_json::from_value::<maix_core::MemoryConfig>(
+                    serde_json::Value::Object(value_map),
+                )
+                {
+                    settings.memory = val;
+                }
+            }
+            "tools" => {
+                if let Ok(val) = serde_json::from_value::<maix_core::ToolsConfig>(
+                    serde_json::Value::Object(value_map),
+                )
+                {
+                    settings.tools = val;
+                }
+            }
+            other => {
+                return Ok(Response::new(pb::UpdateConfigResponse {
+                    success: false,
+                    message: format!("unknown section: {other}"),
+                }));
+            }
+        }
+
+        match maix_core::Config::save_user_settings(&settings) {
+            Ok(path) => Ok(Response::new(pb::UpdateConfigResponse {
+                success: true,
+                message: format!("saved to {}", path.display()),
+            })),
+            Err(e) => Ok(Response::new(pb::UpdateConfigResponse {
+                success: false,
+                message: format!("save failed: {e}"),
+            })),
+        }
     }
 }
 

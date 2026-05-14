@@ -137,6 +137,20 @@ impl Database {
         }
     }
 
+    pub fn search_memories_by_session(
+        &self,
+        session_id: &str,
+        kind: &str,
+        limit: usize,
+    ) -> DbResult<Vec<MemoryRow>> {
+        self.query_memories(
+            "SELECT id, content, kind, importance, session_id, created_at
+             FROM memories WHERE session_id=?1 AND kind=?2
+             ORDER BY created_at DESC LIMIT ?3",
+            params![session_id, kind, limit as i64],
+        )
+    }
+
     pub fn delete_memory(&self, id: &str) -> DbResult<bool> {
         let n = self.conn.execute("DELETE FROM memories WHERE id=?1", params![id])?;
         Ok(n > 0)

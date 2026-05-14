@@ -57,6 +57,20 @@ message SessionInfo {
 message DeleteSessionRequest { string session_id = 1; }
 message DeleteSessionResponse { bool deleted = 1; }
 
+message GetSessionMessagesRequest {
+  string session_id = 1;
+  uint32 limit = 2;
+}
+message GetSessionMessagesResponse {
+  repeated SessionMessage messages = 1;
+}
+message SessionMessage {
+  string role = 1;
+  string content = 2;
+  uint64 token_count = 3;
+  string created_at = 4;
+}
+
 // Agent identities
 message ListAgentsRequest {}
 message ListAgentsResponse {

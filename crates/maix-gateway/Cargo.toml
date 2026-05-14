@@ -1,6 +1,6 @@
 [package]
 name = "maix-gateway"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [[bin]]
@@ -18,7 +18,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+async-trait.workspace = true
 async-stream.workspace = true
 uuid = { version = "1", features = ["v4"] }
 chrono.workspace = true
 futures.workspace = true
+tower-http = { version = "0.5", features = ["cors"] }

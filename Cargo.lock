@@ -143,6 +143,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "atty"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9b39be18770d11421cdb1b9947a45dd3f37e93092cbf377614828a319d5fee8"
+dependencies = [
+ "hermit-abi",
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -423,6 +434,7 @@ checksum = "829d955a0bb380ef178a640b91779e3987da38c9aea133b20614cfed8cdea9c6"
 dependencies = [
  "bitflags",
  "crossterm_winapi",
+ "futures-core",
  "mio",
  "parking_lot",
  "rustix 0.38.44",
@@ -569,6 +581,7 @@ dependencies = [
  "atomic",
  "pear",
  "serde",
+ "serde_json",
  "toml",
  "uncased",
  "version_check",
@@ -746,6 +759,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
 name = "h2"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -810,6 +829,15 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "hermit-abi"
+version = "0.1.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "http"
@@ -1237,7 +1265,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "maix-agent"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1250,6 +1278,7 @@ dependencies = [
  "maix-tools",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "toml",
  "tracing",
@@ -1258,10 +1287,13 @@ dependencies = [
 
 [[package]]
 name = "maix-cli"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
+ "atty",
  "clap",
+ "maix-agent",
  "maix-core",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
@@ -1274,14 +1306,16 @@ dependencies = [
 
 [[package]]
 name = "maix-core"
-version = "0.2.0"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "figment",
  "prost",
  "prost-types",
+ "regex",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -1294,7 +1328,7 @@ dependencies = [
 
 [[package]]
 name = "maix-db"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "rusqlite",
@@ -1305,9 +1339,10 @@ dependencies = [
 
 [[package]]
 name = "maix-gateway"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-stream",
+ "async-trait",
  "axum 0.8.9",
  "chrono",
  "clap",
@@ -1318,6 +1353,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
+ "tower-http 0.5.2",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -1325,26 +1361,27 @@ dependencies = [
 
 [[package]]
 name = "maix-memory"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "chrono",
  "maix-core",
  "maix-db",
+ "maix-provider",
  "reqwest",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
 name = "maix-monitor"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
- "maix-agent",
  "maix-core",
  "serde",
  "serde_json",
@@ -1354,7 +1391,7 @@ dependencies = [
 
 [[package]]
 name = "maix-provider"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "futures",
@@ -1369,7 +1406,7 @@ dependencies = [
 
 [[package]]
 name = "maix-server"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "clap",
@@ -1377,12 +1414,14 @@ dependencies = [
  "futures",
  "maix-agent",
  "maix-core",
+ "maix-db",
  "maix-memory",
  "maix-monitor",
  "maix-provider",
  "maix-skills",
  "maix-task-queue",
  "maix-tools",
+ "prost-types",
  "serde",
  "serde_json",
  "tokio",
@@ -1396,7 +1435,7 @@ dependencies = [
 
 [[package]]
 name = "maix-skills"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "maix-core",
@@ -1411,7 +1450,7 @@ dependencies = [
 
 [[package]]
 name = "maix-task-queue"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "maix-core",
  "maix-db",
@@ -1423,28 +1462,38 @@ dependencies = [
 
 [[package]]
 name = "maix-tools"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-trait",
+ "base64",
+ "chrono",
+ "glob",
  "maix-core",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
  "toml",
  "tracing",
+ "urlencoding",
+ "uuid",
 ]
 
 [[package]]
 name = "maix-tui"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
+ "chrono",
  "clap",
  "crossterm",
+ "futures",
+ "maix-agent",
  "maix-core",
  "ratatui",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -1961,7 +2010,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "tower 0.5.3",
- "tower-http",
+ "tower-http 0.6.10",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -2596,6 +2645,22 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e9cd434a998747dd2c4276bc96ee2e0c7a2eadf3cae88e52be55a05fa9053f5"
+dependencies = [
+ "bitflags",
+ "bytes",
+ "http",
+ "http-body",
+ "http-body-util",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "tower-http"
 version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68d6fdd9f81c2819c9a8b0e0cd91660e7746a8e6ea2ba7c6b2b057985f6bcb51"
@@ -2781,6 +2846,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "utf8_iter"
