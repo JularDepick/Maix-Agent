@@ -101,6 +101,24 @@ impl MaixClient {
             .map(|r| r.into_inner().messages)
     }
 
+    pub async fn fork_session(
+        &self,
+        session_id: &str,
+        from_message_id: &str,
+        new_name: Option<&str>,
+    ) -> Result<pb::ForkSessionResponse, Status> {
+        self.inner
+            .lock()
+            .await
+            .fork_session(Request::new(pb::ForkSessionRequest {
+                session_id: session_id.into(),
+                from_message_id: from_message_id.into(),
+                new_session_name: new_name.map(|s| s.into()),
+            }))
+            .await
+            .map(|r| r.into_inner())
+    }
+
     // -- Chat --
 
     pub async fn chat(

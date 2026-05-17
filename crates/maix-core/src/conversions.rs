@@ -83,6 +83,12 @@ impl From<types::ContentPart> for pb_common::ContentPart {
                     detail: image_url.detail,
                 })),
             },
+            types::ContentPart::ImageBase64 { source } => pb_common::ContentPart {
+                part: Some(pb_common::content_part::Part::Image(pb_common::ImagePart {
+                    url: format!("data:{};base64,{}", source.media_type, source.data),
+                    detail: None,
+                })),
+            },
         }
     }
 }

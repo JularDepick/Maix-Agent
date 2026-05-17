@@ -1,6 +1,6 @@
 [package]
 name = "maix-tools"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 [dependencies]
@@ -18,3 +18,5 @@ chrono.workspace = true
 base64 = "0.22"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
+once_cell = "1"
+home = "0.5"

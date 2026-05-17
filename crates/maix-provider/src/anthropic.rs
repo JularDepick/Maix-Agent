@@ -93,6 +93,12 @@ impl AnthropicProvider {
                                             "source": {"type": "url", "url": image_url.url}
                                         })
                                     }
+                                    maix_core::ContentPart::ImageBase64 { source } => {
+                                        serde_json::json!({
+                                            "type": "image",
+                                            "source": {"type": source.source_type, "media_type": source.media_type, "data": source.data}
+                                        })
+                                    }
                                 })
                                 .collect();
                             serde_json::json!(blocks)

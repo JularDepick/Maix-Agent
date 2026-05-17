@@ -62,6 +62,12 @@ enum Commands {
         action: SkillAction,
     },
 
+    /// Server (daemon) operations
+    Server {
+        #[command(subcommand)]
+        action: ServerAction,
+    },
+
     /// Session operations
     Session {
         #[command(subcommand)]
@@ -83,6 +89,16 @@ enum Commands {
     /// Show daemon health status
     #[command(alias = "status")]
     Health,
+
+    /// Check for updates and update maix
+    Update {
+        /// Check only, don't install
+        #[arg(long)]
+        check: bool,
+    },
+
+    /// Show token usage and cost
+    Cost,
 
     /// Run environment diagnostics
     Doctor,
@@ -205,6 +221,20 @@ enum SkillAction {
 }
 
 #[derive(Subcommand)]
+enum ServerAction {
+    /// Install maix as a Windows Service (or systemd unit on Linux)
+    Install,
+    /// Uninstall the maix service
+    Uninstall,
+    /// Start the maix service
+    Start,
+    /// Stop the maix service
+    Stop,
+    /// Show service status
+    Status,
+}
+
+#[derive(Subcommand)]
 enum SessionAction {
     /// List all saved sessions
     List,
@@ -217,6 +247,17 @@ enum SessionAction {
     Delete {
         /// Session ID
         id: String,
+    },
+    /// Fork a session (create a branch from a message point)
+    Fork {
+        /// Session ID to fork
+        id: String,
+        /// Message index to fork from (0-based, optional - forks from end if omitted)
+        #[arg(long)]
+        from: Option<usize>,
+        /// Name for the new session
+        #[arg(long)]
+        name: Option<String>,
     },
 }
 
@@ -308,6 +349,25 @@ fn truncate_str(s: &str, max_bytes: usize) -> &str {
     &s[..end]
 }
 
+fn dirs_next() -> Option<std::path::PathBuf> {
+    home::home_dir()
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let dest_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&entry.path(), &dest_path)?;
+        } else {
+            std::fs::copy(entry.path(), &dest_path)?;
+        }
+    }
+    Ok(())
+}
+
 #[allow(dead_code)]
 fn agent_mode_from_str(s: &str) -> i32 {
     match s {
@@ -349,10 +409,13 @@ async fn main() {
         Commands::Identity { action } => cmd_identity(&client, action).await,
         Commands::Architecture { action } => cmd_architecture(&client, action).await,
         Commands::Skill { action } => cmd_skill(&client, action).await,
+        Commands::Server { action } => cmd_server(action).await,
         Commands::Session { action } => cmd_session(&client, action).await,
         Commands::Task { action } => cmd_task(&client, action).await,
         Commands::Tool { action } => cmd_tool(&client, action).await,
         Commands::Health => cmd_health(&client).await,
+        Commands::Update { check } => cmd_update(check).await,
+        Commands::Cost => cmd_cost(&client).await,
         Commands::Doctor => cmd_doctor(&client).await,
         Commands::Init { force } => cmd_init(force).await,
     }
@@ -678,8 +741,65 @@ async fn cmd_architecture(client: &MaixClient, action: ArchitectureAction) {
 async fn cmd_skill(client: &MaixClient, action: SkillAction) {
     match action {
         SkillAction::Install { source } => {
-            let _ = source;
-            eprintln!("Skill install not yet available via CLI");
+            // Install skill from local path or URL
+            let source_path = std::path::Path::new(&source);
+            let skills_dir = dirs_next()
+                .map(|h| h.join(".maix").join("skills"))
+                .unwrap_or_else(|| std::path::PathBuf::from(".maix/skills"));
+
+            if source_path.exists() {
+                // Local path install
+                let skill_name = source_path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unnamed".into());
+                let dest = skills_dir.join(&skill_name);
+
+                if dest.exists() {
+                    eprintln!("Skill '{}' already exists at {}", skill_name, dest.display());
+                    eprintln!("Remove it first or use a different name.");
+                    std::process::exit(1);
+                }
+
+                // Copy directory
+                if source_path.is_dir() {
+                    match copy_dir_recursive(source_path, &dest) {
+                        Ok(_) => {
+                            // Validate manifest
+                            match maix_skills::manifest::SkillManifest::from_dir(&dest) {
+                                Ok(manifest) => {
+                                    println!("Installed skill '{}' v{} from {}", manifest.skill.name, manifest.skill.version, source);
+                                    println!("  Location: {}", dest.display());
+                                    if let Some(desc) = &manifest.skill.description {
+                                        println!("  Description: {}", desc);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Warning: skill installed but manifest invalid: {e}");
+                                    println!("Installed to {}", dest.display());
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error copying skill: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    eprintln!("Source must be a directory");
+                    std::process::exit(1);
+                }
+            } else if source.starts_with("http://") || source.starts_with("https://") {
+                eprintln!("URL install not yet supported. Please download manually and install from local path.");
+                std::process::exit(1);
+            } else if source.contains(':') && source.contains('/') {
+                // GitHub shorthand: user/repo
+                eprintln!("GitHub shorthand install not yet supported.");
+                eprintln!("Use: git clone https://github.com/{} /tmp/skill && maix skill install /tmp/skill", source);
+                std::process::exit(1);
+            } else {
+                eprintln!("Source not found: {}", source);
+                std::process::exit(1);
+            }
         }
         SkillAction::List => match client.list_skills().await {
             Ok(list) => {
@@ -702,6 +822,259 @@ async fn cmd_skill(client: &MaixClient, action: SkillAction) {
             Ok(_) => println!("Disabled: {name}"),
             Err(e) => eprintln!("Error: {e}"),
         },
+    }
+}
+
+const SERVICE_NAME: &str = "MaixAgent";
+const SERVICE_DISPLAY: &str = "Maix-Agent AI Assistant";
+
+async fn cmd_server(action: ServerAction) {
+    match action {
+        ServerAction::Install => {
+            #[cfg(windows)]
+            {
+                // Find the maix binary path
+                let maix_exe = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.join("maix.exe")))
+                    .filter(|p| p.exists());
+
+                let exe_path = match maix_exe {
+                    Some(p) => p,
+                    None => {
+                        eprintln!("Error: maix.exe not found next to maix-cli.exe");
+                        eprintln!("Ensure maix-server is built and in the same directory.");
+                        std::process::exit(1);
+                    }
+                };
+
+                // Use sc.exe to create the service
+                let output = std::process::Command::new("sc.exe")
+                    .args([
+                        "create",
+                        SERVICE_NAME,
+                        "binPath=",
+                        &format!("{} --service", exe_path.display()),
+                        "start=",
+                        "auto",
+                        "DisplayName=",
+                        SERVICE_DISPLAY,
+                    ])
+                    .output();
+
+                match output {
+                    Ok(o) if o.status.success() => {
+                        println!("Service '{}' installed successfully.", SERVICE_NAME);
+                        println!("  Binary: {}", exe_path.display());
+                        println!("  Start:  auto (boot)");
+                        println!("  Use 'maix server start' to start now.");
+                    }
+                    Ok(o) => {
+                        eprintln!("sc.exe failed: {}", String::from_utf8_lossy(&o.stderr));
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        eprintln!("Error running sc.exe: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                // systemd unit file for Linux
+                let unit_content = format!(
+                    "[Unit]\n\
+                     Description=Maix-Agent AI Assistant\n\
+                     After=network.target\n\n\
+                     [Service]\n\
+                     Type=simple\n\
+                     ExecStart=/usr/local/bin/maix --foreground\n\
+                     Restart=on-failure\n\
+                     RestartSec=5\n\n\
+                     [Install]\n\
+                     WantedBy=multi-user.target\n"
+                );
+                let unit_path = "/etc/systemd/system/maix-agent.service";
+                match std::fs::write(unit_path, unit_content) {
+                    Ok(_) => {
+                        println!("Service unit file written to {unit_path}");
+                        println!("Run: sudo systemctl daemon-reload && sudo systemctl enable maix-agent");
+                    }
+                    Err(e) => {
+                        eprintln!("Error writing unit file: {e}");
+                        eprintln!("Try running with sudo.");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        ServerAction::Uninstall => {
+            #[cfg(windows)]
+            {
+                // Stop first, then delete
+                let _ = std::process::Command::new("sc.exe")
+                    .args(["stop", SERVICE_NAME])
+                    .output();
+
+                let output = std::process::Command::new("sc.exe")
+                    .args(["delete", SERVICE_NAME])
+                    .output();
+
+                match output {
+                    Ok(o) if o.status.success() => {
+                        println!("Service '{}' uninstalled.", SERVICE_NAME);
+                    }
+                    Ok(o) => {
+                        eprintln!("sc.exe failed: {}", String::from_utf8_lossy(&o.stderr));
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        eprintln!("Error running sc.exe: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = std::process::Command::new("systemctl")
+                    .args(["disable", "maix-agent"])
+                    .status();
+                match std::fs::remove_file("/etc/systemd/system/maix-agent.service") {
+                    Ok(_) => {
+                        println!("Service removed. Run: sudo systemctl daemon-reload");
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        ServerAction::Start => {
+            #[cfg(windows)]
+            {
+                let output = std::process::Command::new("sc.exe")
+                    .args(["start", SERVICE_NAME])
+                    .output();
+                match output {
+                    Ok(o) if o.status.success() => {
+                        println!("Service '{}' started.", SERVICE_NAME);
+                    }
+                    Ok(o) => {
+                        let stderr = String::from_utf8_lossy(&o.stderr);
+                        let stdout = String::from_utf8_lossy(&o.stdout);
+                        if stderr.contains("1056") || stdout.contains("1056") {
+                            println!("Service '{}' is already running.", SERVICE_NAME);
+                        } else {
+                            eprintln!("sc.exe failed: {stderr}{stdout}");
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error running sc.exe: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                match std::process::Command::new("systemctl")
+                    .args(["start", "maix-agent"])
+                    .status()
+                {
+                    Ok(s) if s.success() => println!("Service started."),
+                    Ok(_) => {
+                        eprintln!("Failed to start service.");
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        ServerAction::Stop => {
+            #[cfg(windows)]
+            {
+                let output = std::process::Command::new("sc.exe")
+                    .args(["stop", SERVICE_NAME])
+                    .output();
+                match output {
+                    Ok(o) if o.status.success() => {
+                        println!("Service '{}' stopped.", SERVICE_NAME);
+                    }
+                    Ok(o) => {
+                        let stderr = String::from_utf8_lossy(&o.stderr);
+                        let stdout = String::from_utf8_lossy(&o.stdout);
+                        if stderr.contains("1062") || stdout.contains("1062") {
+                            println!("Service '{}' is not running.", SERVICE_NAME);
+                        } else {
+                            eprintln!("sc.exe failed: {stderr}{stdout}");
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error running sc.exe: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                match std::process::Command::new("systemctl")
+                    .args(["stop", "maix-agent"])
+                    .status()
+                {
+                    Ok(s) if s.success() => println!("Service stopped."),
+                    Ok(_) => {
+                        eprintln!("Failed to stop service.");
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        ServerAction::Status => {
+            #[cfg(windows)]
+            {
+                let output = std::process::Command::new("sc.exe")
+                    .args(["query", SERVICE_NAME])
+                    .output();
+                match output {
+                    Ok(o) => {
+                        let stdout = String::from_utf8_lossy(&o.stdout);
+                        if stdout.contains("does not exist") || stdout.contains("1060") {
+                            println!("Service '{}' is not installed.", SERVICE_NAME);
+                        } else {
+                            println!("{}", stdout.trim());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error running sc.exe: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                match std::process::Command::new("systemctl")
+                    .args(["status", "maix-agent"])
+                    .output()
+                {
+                    Ok(o) => {
+                        println!("{}", String::from_utf8_lossy(&o.stdout));
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -742,6 +1115,38 @@ async fn cmd_session(client: &MaixClient, action: SessionAction) {
             Ok(false) => println!("Session not found: {id}"),
             Err(e) => eprintln!("Error: {e}"),
         },
+        SessionAction::Fork { id, from, name } => {
+            // If from is specified, get the message at that index to use as from_message_id
+            let from_id = match from {
+                Some(idx) => {
+                    match client.get_session_messages(&id, 1000).await {
+                        Ok(msgs) => {
+                            if idx >= msgs.len() {
+                                eprintln!("Error: message index {} out of range (session has {} messages)", idx, msgs.len());
+                                std::process::exit(1);
+                            }
+                            msgs[idx].created_at.clone()
+                        }
+                        Err(e) => {
+                            eprintln!("Error getting messages: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                None => String::new(), // Empty = fork from end
+            };
+
+            match client.fork_session(&id, &from_id, name.as_deref()).await {
+                Ok(resp) => {
+                    println!("Forked session: {}", resp.new_session_id);
+                    println!("  Copied {} messages", resp.copied_messages);
+                }
+                Err(e) => {
+                    eprintln!("Error forking session: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 }
 
@@ -762,6 +1167,196 @@ async fn cmd_doctor(client: &MaixClient) {
     let config = maix_core::Config::load().unwrap_or_else(|_| maix_core::Config::minimal());
     let results = doctor::run_diagnostics(&config, client).await;
     println!("{}", doctor::format_diagnostics(&results));
+}
+
+async fn cmd_cost(client: &MaixClient) {
+    match client.get_work_status().await {
+        Ok(status) => {
+            let pricing = maix_core::types::Pricing::default();
+            let total_tokens = status.total_tokens;
+            let total_cost = status.total_cost;
+
+            println!("Maix-Agent Cost Report");
+            println!("{}", "─".repeat(40));
+            println!("Active agents:    {}", status.active_agents);
+            println!("Idle agents:      {}", status.idle_agents);
+            println!("Queue depth:      {}", status.queue_depth);
+            println!("Tasks completed:  {}", status.tasks_completed);
+            println!("Tasks failed:     {}", status.tasks_failed);
+            println!("Uptime:           {}s", status.uptime_secs);
+            println!();
+            println!("Token Usage");
+            println!("{}", "─".repeat(40));
+            println!("Total tokens:     {}", format_number(total_tokens));
+
+            if !status.agents.is_empty() {
+                println!();
+                println!("Per-Agent Breakdown");
+                println!("{}", "─".repeat(40));
+                for agent in &status.agents {
+                    println!(
+                        "  {} ({}): {} tokens, {} tool calls",
+                        agent.agent_id,
+                        agent.state,
+                        format_number(agent.total_tokens),
+                        agent.tool_calls
+                    );
+                }
+            }
+
+            println!();
+            println!("Cost Estimate");
+            println!("{}", "─".repeat(40));
+            // Estimate based on default pricing
+            let estimated_input = total_tokens * 70 / 100; // rough estimate: 70% input
+            let estimated_output = total_tokens * 30 / 100; // 30% output
+            let input_cost = estimated_input as f64 * pricing.input_per_million / 1_000_000.0;
+            let output_cost = estimated_output as f64 * pricing.output_per_million / 1_000_000.0;
+
+            if total_cost > 0.0 {
+                println!("Server tracked:   ¥{:.4}", total_cost);
+            }
+            println!("Estimated ({} tok):", format_number(total_tokens));
+            println!("  Input ({}%):     ¥{:.4}", 70, input_cost);
+            println!("  Output ({}%):    ¥{:.4}", 30, output_cost);
+            println!("  Total:           ¥{:.4}", input_cost + output_cost);
+        }
+        Err(e) => {
+            eprintln!("Error getting work status: {e}");
+            eprintln!("Is the maix server running?");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn format_number(n: u64) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
+async fn cmd_update(check_only: bool) {
+    let current = env!("CARGO_PKG_VERSION");
+    println!("Current version: v{}", current);
+    println!("Checking for updates...");
+
+    let url = "https://api.github.com/repos/JularDepick/Maix-Agent/releases/latest";
+    let http_client = match reqwest::Client::builder()
+        .user_agent(format!("maix-cli/{}", current))
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let resp = match http_client.get(url).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error checking for updates: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    if !resp.status().is_success() {
+        eprintln!("GitHub API returned status {}", resp.status());
+        std::process::exit(1);
+    }
+
+    let body = match resp.text().await {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("Error reading response: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let checker = maix_core::update::UpdateChecker::new(current);
+    match checker.parse_release_json(&body) {
+        Some(info) => {
+            println!("\nNew version available: v{} -> v{}", info.current, info.latest);
+            if !info.release_notes.is_empty() {
+                println!("\nRelease notes:");
+                // Show first 500 chars of release notes
+                let notes = if info.release_notes.len() > 500 {
+                    format!("{}...", &info.release_notes[..500])
+                } else {
+                    info.release_notes.clone()
+                };
+                println!("{}", notes);
+            }
+            println!("\nDownload: {}", info.download_url);
+
+            if check_only {
+                return;
+            }
+
+            // Download and install
+            println!("\nDownloading v{}...", info.latest);
+            let temp_dir = std::env::temp_dir();
+            let ext = if cfg!(target_os = "windows") { "zip" } else { "tar.gz" };
+            let archive_path = temp_dir.join(format!("maix-update.{}", ext));
+
+            match download_file(&info.download_url, &archive_path).await {
+                Ok(_) => {
+                    println!("Downloaded to {}", archive_path.display());
+                    println!("\nTo install:");
+                    if cfg!(target_os = "windows") {
+                        println!("  1. Stop the maix service: maix server stop");
+                        println!("  2. Extract {} to your maix directory", archive_path.display());
+                        println!("  3. Start the maix service: maix server start");
+                    } else {
+                        println!("  1. Stop the maix service: maix server stop");
+                        println!("  2. tar xzf {} -C /usr/local/bin/", archive_path.display());
+                        println!("  3. Start the maix service: maix server start");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Download failed: {e}");
+                    eprintln!("Please download manually from: {}", info.download_url);
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => {
+            println!("You are running the latest version (v{}).", current);
+        }
+    }
+}
+
+async fn download_file(url: &str, dest: &std::path::Path) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .user_agent("maix-cli")
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("build client: {e}"))?;
+
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("download: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("download returned {}", resp.status()));
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("read download: {e}"))?;
+
+    std::fs::write(dest, &bytes).map_err(|e| format!("write file: {e}"))?;
+    Ok(())
 }
 
 async fn cmd_config(client: &MaixClient, action: Option<ConfigAction>) {

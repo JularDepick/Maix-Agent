@@ -3,6 +3,7 @@ mod client_launcher;
 mod collaboration;
 mod daemon;
 mod server;
+pub mod service;
 mod session_manager;
 mod shutdown;
 mod transport;
@@ -23,6 +24,10 @@ struct Cli {
     #[arg(long)]
     foreground: bool,
 
+    /// Run as Windows Service (used by SCM, not for manual invocation)
+    #[arg(long, hide = true)]
+    service: bool,
+
     /// Unix socket path (overrides config)
     #[arg(long)]
     socket_path: Option<String>,
@@ -36,8 +41,7 @@ struct Cli {
     transport: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     maix_core::init_console_utf8();
 
     tracing_subscriber::fmt()
@@ -48,6 +52,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
 
+    // Windows Service mode: dispatch to SCM
+    if cli.service {
+        return service::windows::start_dispatcher().map_err(|e| e.into());
+    }
+
+    // Run the async server
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async_main(cli))
+}
+
+async fn async_main(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     if !cli.foreground {
         daemon::daemonize()?;
     }
@@ -119,6 +134,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .await?;
             return Ok(());
+        }
+    }
+
+    // Windows Named Pipe transport
+    #[cfg(windows)]
+    {
+        if transport_mode == TransportMode::NamedPipe || transport_mode == TransportMode::Auto {
+            let pipe_name = transport::default_pipe_name();
+            match transport::named_pipe_transport::NamedPipeListener::bind(&pipe_name) {
+                Ok(listener) => {
+                    let incoming = transport::named_pipe_transport::NamedPipeListenerStream::new(listener);
+                    tracing::info!("listening on named pipe: {}", pipe_name);
+                    Server::builder()
+                        .add_service(core_service)
+                        .serve_with_incoming_shutdown(
+                            incoming,
+                            shutdown::shutdown_signal(core.cancel_root.clone()),
+                        )
+                        .await?;
+                    return Ok(());
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to bind named pipe '{}': {}, falling back to TCP", pipe_name, e);
+                }
+            }
         }
     }
 

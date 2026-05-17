@@ -10,6 +10,8 @@ pub enum HookType {
     PreToolUse,
     PostToolUse,
     Stop,
+    Notification,
+    SubagentStop,
 }
 
 impl HookType {
@@ -18,6 +20,8 @@ impl HookType {
             "PreToolUse" | "pre_tool_use" => Some(Self::PreToolUse),
             "PostToolUse" | "post_tool_use" => Some(Self::PostToolUse),
             "Stop" | "stop" => Some(Self::Stop),
+            "Notification" | "notification" => Some(Self::Notification),
+            "SubagentStop" | "subagent_stop" => Some(Self::SubagentStop),
             _ => None,
         }
     }
@@ -156,6 +160,52 @@ impl HookRunner {
     /// Check if any hooks are configured.
     pub fn has_hooks(&self) -> bool {
         !self.hooks.is_empty()
+    }
+
+    /// Run Notification hooks. Called when the agent sends a notification.
+    pub async fn run_notification(
+        &self,
+        message: &str,
+        working_dir: &std::path::Path,
+    ) {
+        let hooks = match self.hooks.get(&HookType::Notification) {
+            Some(h) => h,
+            None => return,
+        };
+
+        for hook in hooks {
+            let mut env = HashMap::new();
+            env.insert("MAIX_NOTIFICATION".into(), message.into());
+            env.insert("MAIX_WORKING_DIR".into(), working_dir.display().to_string());
+
+            if let Err(e) = run_command(&hook.command, &env, hook.timeout_ms, working_dir).await {
+                tracing::warn!("Notification hook failed: {}", e);
+            }
+        }
+    }
+
+    /// Run SubagentStop hooks. Called when a sub-agent finishes.
+    pub async fn run_subagent_stop(
+        &self,
+        agent_id: &str,
+        result: &str,
+        working_dir: &std::path::Path,
+    ) {
+        let hooks = match self.hooks.get(&HookType::SubagentStop) {
+            Some(h) => h,
+            None => return,
+        };
+
+        for hook in hooks {
+            let mut env = HashMap::new();
+            env.insert("MAIX_AGENT_ID".into(), agent_id.into());
+            env.insert("MAIX_AGENT_RESULT".into(), result.into());
+            env.insert("MAIX_WORKING_DIR".into(), working_dir.display().to_string());
+
+            if let Err(e) = run_command(&hook.command, &env, hook.timeout_ms, working_dir).await {
+                tracing::warn!("SubagentStop hook failed: {}", e);
+            }
+        }
     }
 }
 
@@ -299,6 +349,8 @@ mod tests {
         assert_eq!(HookType::parse("pre_tool_use"), Some(HookType::PreToolUse));
         assert_eq!(HookType::parse("PostToolUse"), Some(HookType::PostToolUse));
         assert_eq!(HookType::parse("Stop"), Some(HookType::Stop));
+        assert_eq!(HookType::parse("Notification"), Some(HookType::Notification));
+        assert_eq!(HookType::parse("SubagentStop"), Some(HookType::SubagentStop));
         assert_eq!(HookType::parse("invalid"), None);
     }
 

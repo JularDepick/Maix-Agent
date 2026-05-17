@@ -71,6 +71,16 @@ message SessionMessage {
   string created_at = 4;
 }
 
+message ForkSessionRequest {
+  string session_id = 1;
+  string from_message_id = 2;
+  optional string new_session_name = 3;
+}
+message ForkSessionResponse {
+  string new_session_id = 1;
+  uint32 copied_messages = 2;
+}
+
 // Agent identities
 message ListAgentsRequest {}
 message ListAgentsResponse {

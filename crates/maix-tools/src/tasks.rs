@@ -17,6 +17,8 @@ pub struct Task {
     pub status: TaskStatus,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub output: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -93,6 +95,7 @@ impl Tool for TaskCreateTool {
             status: TaskStatus::Pending,
             created_at: now.clone(),
             updated_at: now,
+            output: String::new(),
         };
 
         let mut store = self.store.lock().await;
@@ -320,5 +323,51 @@ impl Tool for TaskStopTool {
         task.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
         Ok(format!("Stopped task {}: reset to pending", task_id))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TaskOutputTool
+// ---------------------------------------------------------------------------
+
+pub struct TaskOutputTool {
+    store: TaskStore,
+}
+
+impl TaskOutputTool {
+    pub fn new(store: TaskStore) -> Self {
+        Self { store }
+    }
+}
+
+#[async_trait]
+impl Tool for TaskOutputTool {
+    fn def(&self) -> ToolDef {
+        ToolDef {
+            name: "task_output".into(),
+            description: "Get the output/result of a task.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string", "description": "Task ID" }
+                },
+                "required": ["task_id"]
+            }),
+            risk_level: RiskLevel::ReadOnly,
+        }
+    }
+
+    async fn execute(&self, _ctx: &ToolCtx, args: Value) -> MaixResult<String> {
+        let task_id = args["task_id"].as_str().unwrap_or_default();
+
+        let store = self.store.lock().await;
+        let task = store.get(task_id)
+            .ok_or_else(|| maix_core::MaixError::Tool(format!("task not found: {task_id}")))?;
+
+        if task.output.is_empty() {
+            Ok(format!("Task {} has no output yet. Status: {}", task_id, task.status))
+        } else {
+            Ok(format!("Task {} output:\n{}", task_id, task.output))
+        }
     }
 }

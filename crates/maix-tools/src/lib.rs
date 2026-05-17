@@ -32,6 +32,7 @@ pub mod tasks;
 pub mod templates;
 pub mod test_runner;
 pub mod undo;
+pub mod worktree;
 pub mod workflow;
 pub use sandbox::WorkDirSandbox;
 
@@ -1443,6 +1444,7 @@ impl ToolRegistry {
         reg.register(Box::new(tasks::TaskListTool::new(reg.task_store.clone())));
         reg.register(Box::new(tasks::TaskGetTool::new(reg.task_store.clone())));
         reg.register(Box::new(tasks::TaskStopTool::new(reg.task_store.clone())));
+        reg.register(Box::new(tasks::TaskOutputTool::new(reg.task_store.clone())));
         // User interaction
         reg.register(Box::new(AskUserTool::new()));
         // Sub-agent
@@ -1525,12 +1527,27 @@ impl ToolRegistry {
         reg.register(Box::new(scheduler::ScheduleListTool(scheduler.clone())));
         reg.register(Box::new(scheduler::ScheduleAddTool(scheduler.clone())));
         reg.register(Box::new(scheduler::ScheduleRemoveTool(scheduler.clone())));
-        reg.register(Box::new(scheduler::FileWatchTool(scheduler)));
+        reg.register(Box::new(scheduler::FileWatchTool(scheduler.clone())));
+        // Cron scheduler
+        reg.register(Box::new(scheduler::CronCreateTool(scheduler.clone())));
+        reg.register(Box::new(scheduler::CronDeleteTool(scheduler.clone())));
+        reg.register(Box::new(scheduler::CronListTool(scheduler.clone())));
+        reg.register(Box::new(scheduler::ScheduleWakeupTool(scheduler)));
+        // Worktree management
+        reg.register(Box::new(worktree::WorktreeCreateTool));
+        reg.register(Box::new(worktree::WorktreeListTool));
+        reg.register(Box::new(worktree::WorktreeExitTool));
         // AST-aware editing
         reg.register(Box::new(ast::AstRenameTool));
         reg.register(Box::new(ast::AstFindRefsTool));
         reg.register(Box::new(ast::AstExtractTool));
         reg.register(Box::new(ast::AstDefinitionsTool));
+        // LSP client tools
+        reg.register(Box::new(lsp::tools::LspGotoDefinitionTool));
+        reg.register(Box::new(lsp::tools::LspFindReferencesTool));
+        reg.register(Box::new(lsp::tools::LspHoverTool));
+        reg.register(Box::new(lsp::tools::LspDocumentSymbolsTool));
+        reg.register(Box::new(lsp::tools::LspWorkspaceSymbolsTool));
         reg
     }
 

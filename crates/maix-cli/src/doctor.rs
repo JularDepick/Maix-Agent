@@ -56,6 +56,12 @@ pub async fn run_diagnostics(config: &Config, client: &MaixClient) -> Vec<Diagno
     // 8. Git
     results.push(check_git());
 
+    // 9. Skills directory
+    results.push(check_skills_dir());
+
+    // 10. Version update
+    results.push(check_version().await);
+
     results
 }
 
@@ -261,6 +267,81 @@ fn dirs_home() -> std::path::PathBuf {
         std::env::var("HOME")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
+    }
+}
+
+fn check_skills_dir() -> DiagnosticResult {
+    let skills_dir = dirs_home().join(".maix").join("skills");
+    if skills_dir.exists() {
+        let count = std::fs::read_dir(&skills_dir)
+            .map(|entries| entries.filter(|e| e.as_ref().map(|e| e.path().is_dir()).unwrap_or(false)).count())
+            .unwrap_or(0);
+        DiagnosticResult {
+            name: "Skills 目录".into(),
+            status: DiagStatus::Pass,
+            message: format!("{} ({} 个技能)", skills_dir.display(), count),
+            fix_hint: None,
+        }
+    } else {
+        DiagnosticResult {
+            name: "Skills 目录".into(),
+            status: DiagStatus::Pass,
+            message: format!("{} (不存在，首次安装技能时自动创建)", skills_dir.display()),
+            fix_hint: None,
+        }
+    }
+}
+
+async fn check_version() -> DiagnosticResult {
+    let current = env!("CARGO_PKG_VERSION");
+    let url = "https://api.github.com/repos/JularDepick/Maix-Agent/releases/latest";
+
+    let client = match reqwest::Client::builder()
+        .user_agent(format!("maix-cli/{}", current))
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => {
+            return DiagnosticResult {
+                name: "版本检查".into(),
+                status: DiagStatus::Warn,
+                message: format!("当前 v{} (无法检查更新)", current),
+                fix_hint: None,
+            };
+        }
+    };
+
+    match client.get(url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            if let Ok(body) = resp.text().await {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                    if let Some(tag) = json.get("tag_name").and_then(|t| t.as_str()) {
+                        let latest = tag.trim_start_matches('v');
+                        if latest != current {
+                            return DiagnosticResult {
+                                name: "版本检查".into(),
+                                status: DiagStatus::Warn,
+                                message: format!("当前 v{}, 最新 v{}", current, latest),
+                                fix_hint: Some("运行 `maix update` 更新".into()),
+                            };
+                        }
+                    }
+                }
+            }
+            DiagnosticResult {
+                name: "版本检查".into(),
+                status: DiagStatus::Pass,
+                message: format!("v{} (最新版)", current),
+                fix_hint: None,
+            }
+        }
+        _ => DiagnosticResult {
+            name: "版本检查".into(),
+            status: DiagStatus::Pass,
+            message: format!("v{} (无法检查更新)", current),
+            fix_hint: None,
+        },
     }
 }
 

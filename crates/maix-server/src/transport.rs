@@ -93,3 +93,110 @@ pub mod unix_transport {
 
     pub type IncomingStream = TcpListenerStream;
 }
+
+/// Windows Named Pipe transport for gRPC.
+#[cfg(windows)]
+pub mod named_pipe_transport {
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+    use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+
+    /// A Named Pipe listener that yields `NamedPipeConnection` instances.
+    pub struct NamedPipeListener {
+        pipe_name: String,
+    }
+
+    impl NamedPipeListener {
+        pub fn bind(pipe_name: &str) -> Result<Self, std::io::Error> {
+            // Create the first pipe instance to ensure the name is valid
+            let _server = ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(pipe_name)?;
+            Ok(Self {
+                pipe_name: pipe_name.to_string(),
+            })
+        }
+    }
+
+    /// A connected Named Pipe stream.
+    pub struct NamedPipeConnection {
+        inner: NamedPipeServer,
+    }
+
+    impl tonic::transport::server::Connected for NamedPipeConnection {
+        type ConnectInfo = ();
+
+        fn connect_info(&self) -> Self::ConnectInfo {}
+    }
+
+    impl AsyncRead for NamedPipeConnection {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Pin::new(&mut self.inner).poll_read(cx, buf)
+        }
+    }
+
+    impl AsyncWrite for NamedPipeConnection {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            Pin::new(&mut self.inner).poll_write(cx, buf)
+        }
+
+        fn poll_flush(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Pin::new(&mut self.inner).poll_flush(cx)
+        }
+
+        fn poll_shutdown(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Pin::new(&mut self.inner).poll_shutdown(cx)
+        }
+    }
+
+    /// Stream adapter for tonic's `serve_with_incoming`.
+    pub struct NamedPipeListenerStream {
+        listener: NamedPipeListener,
+        pending: Option<Pin<Box<dyn std::future::Future<Output = Result<NamedPipeConnection, std::io::Error>> + Send>>>,
+    }
+
+    impl NamedPipeListenerStream {
+        pub fn new(listener: NamedPipeListener) -> Self {
+            Self { listener, pending: None }
+        }
+    }
+
+    impl futures::Stream for NamedPipeListenerStream {
+        type Item = Result<NamedPipeConnection, std::io::Error>;
+
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            loop {
+                if let Some(ref mut fut) = self.pending {
+                    match fut.as_mut().poll(cx) {
+                        Poll::Ready(result) => {
+                            self.pending = None;
+                            return Poll::Ready(Some(result));
+                        }
+                        Poll::Pending => return Poll::Pending,
+                    }
+                }
+                let pipe_name = self.listener.pipe_name.clone();
+                self.pending = Some(Box::pin(async move {
+                    let server = ServerOptions::new().create(&pipe_name)?;
+                    server.connect().await?;
+                    Ok(NamedPipeConnection { inner: server })
+                }));
+            }
+        }
+    }
+}

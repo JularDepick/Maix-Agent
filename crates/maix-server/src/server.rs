@@ -544,6 +544,73 @@ impl CoreService for MaixCoreService {
         Ok(Response::new(pb::GetSessionMessagesResponse { messages }))
     }
 
+    async fn fork_session(
+        &self,
+        request: Request<pb::ForkSessionRequest>,
+    ) -> Result<Response<pb::ForkSessionResponse>, Status> {
+        let req = request.into_inner();
+        let new_session_id = uuid::Uuid::new_v4().to_string();
+        let new_name = req.new_session_name.unwrap_or_else(|| {
+            format!("fork of {}", req.session_id)
+        });
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Create new session in DB
+        {
+            let db = self.0.db.lock().await;
+            db.create_session(&new_session_id, &new_name)
+                .map_err(|e| Status::internal(format!("create session: {e}")))?;
+
+            // Get messages from source session
+            let messages = db
+                .list_messages(&req.session_id, None)
+                .map_err(|e| Status::internal(format!("list messages: {e}")))?;
+
+            // Copy messages up to (and including) the specified message
+            let mut copied = 0u32;
+            for msg in &messages {
+                db.insert_message(
+                    &new_session_id,
+                    &msg.role,
+                    &msg.content,
+                    None,
+                    msg.token_count as u64,
+                )
+                .map_err(|e| Status::internal(format!("insert message: {e}")))?;
+                copied += 1;
+
+                // If we've reached the target message, stop
+                if !req.from_message_id.is_empty() && msg.created_at == req.from_message_id {
+                    break;
+                }
+            }
+
+            // Create in-memory session handle
+            let working_dir = std::env::current_dir().unwrap_or_default();
+            let agent = self.0.build_agent(&new_session_id, working_dir).await;
+            let meta = SessionMeta {
+                id: new_session_id.clone(),
+                name: new_name,
+                created_at: now.clone(),
+                updated_at: now,
+                message_count: copied as u64,
+            };
+            let handle = SessionHandle {
+                agent: Arc::new(tokio::sync::Mutex::new(Some(agent))),
+                meta,
+                cancel: CancellationToken::new(),
+            };
+            // Must drop db lock before inserting into sessions
+            drop(db);
+            self.0.sessions.insert(new_session_id.clone(), handle).await;
+
+            Ok(Response::new(pb::ForkSessionResponse {
+                new_session_id,
+                copied_messages: copied,
+            }))
+        }
+    }
+
     // ---- Agent management ----
 
     async fn list_agents(

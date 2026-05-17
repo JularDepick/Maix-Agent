@@ -48,6 +48,15 @@ impl MessageContent {
 pub enum ContentPart {
     Text { text: String },
     ImageUrl { image_url: ImageUrl },
+    ImageBase64 { source: ImageSource },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageSource {
+    #[serde(rename = "type")]
+    pub source_type: String,
+    pub media_type: String,
+    pub data: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

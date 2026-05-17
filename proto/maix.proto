@@ -20,6 +20,7 @@ service CoreService {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
   rpc GetSessionMessages(GetSessionMessagesRequest) returns (GetSessionMessagesResponse);
+  rpc ForkSession(ForkSessionRequest) returns (ForkSessionResponse);
 
   // Chat (bidirectional stream)
   rpc Chat(stream ChatInput) returns (stream ChatOutput);

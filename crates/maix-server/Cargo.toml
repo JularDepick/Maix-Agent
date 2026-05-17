@@ -1,6 +1,6 @@
 [package]
 name = "maix-server"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 [[bin]]
@@ -37,3 +37,6 @@ clap.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 daemonize = "0.5"
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"

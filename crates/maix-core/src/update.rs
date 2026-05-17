@@ -8,6 +8,7 @@ pub struct UpdateInfo {
     pub current: String,
     pub latest: String,
     pub download_url: String,
+    pub release_notes: String,
 }
 
 /// Checks for updates via GitHub releases API.
@@ -77,18 +78,98 @@ impl UpdateChecker {
             .get("html_url")
             .and_then(|u| u.as_str())
             .unwrap_or_default();
+        let body = value
+            .get("body")
+            .and_then(|b| b.as_str())
+            .unwrap_or("")
+            .to_string();
 
         let version = tag.trim_start_matches('v');
-        if version != self.current_version {
+        if version != self.current_version && compare_versions(version, &self.current_version) > 0 {
+            // Find the best asset download URL for the current platform
+            let download_url = find_asset_url(&value).unwrap_or_else(|| url.to_string());
             Some(UpdateInfo {
                 current: self.current_version.clone(),
                 latest: version.to_string(),
-                download_url: url.to_string(),
+                download_url,
+                release_notes: body,
             })
         } else {
             None
         }
     }
+}
+
+/// Compare two semver strings. Returns positive if a > b, negative if a < b, 0 if equal.
+fn compare_versions(a: &str, b: &str) -> i32 {
+    let parse = |s: &str| -> (u32, u32, u32) {
+        let parts: Vec<&str> = s.split('.').collect();
+        (
+            parts.first().and_then(|p| p.parse().ok()).unwrap_or(0),
+            parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(0),
+            parts.get(2).and_then(|p| p.parse().ok()).unwrap_or(0),
+        )
+    };
+    let (a1, a2, a3) = parse(a);
+    let (b1, b2, b3) = parse(b);
+    match a1.cmp(&b1) {
+        std::cmp::Ordering::Greater => return 1,
+        std::cmp::Ordering::Less => return -1,
+        _ => {}
+    }
+    match a2.cmp(&b2) {
+        std::cmp::Ordering::Greater => return 1,
+        std::cmp::Ordering::Less => return -1,
+        _ => {}
+    }
+    match a3.cmp(&b3) {
+        std::cmp::Ordering::Greater => 1,
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+    }
+}
+
+/// Find the best download asset URL for the current platform.
+fn find_asset_url(release: &serde_json::Value) -> Option<String> {
+    let assets = release.get("assets")?.as_array()?;
+    let (os, arch) = platform_tags();
+
+    // Find matching asset
+    for asset in assets {
+        let name = asset.get("name")?.as_str()?.to_lowercase();
+        if name.contains(os) && name.contains(arch) && (name.ends_with(".zip") || name.ends_with(".tar.gz") || name.ends_with(".exe")) {
+            return asset.get("browser_download_url")?.as_str().map(|s| s.to_string());
+        }
+    }
+
+    // Fallback: first zip/tar.gz/exe
+    for asset in assets {
+        let name = asset.get("name")?.as_str()?.to_lowercase();
+        if name.ends_with(".zip") || name.ends_with(".tar.gz") || name.ends_with(".exe") {
+            return asset.get("browser_download_url")?.as_str().map(|s| s.to_string());
+        }
+    }
+
+    None
+}
+
+/// Return (os_tag, arch_tag) for platform matching in asset names.
+fn platform_tags() -> (&'static str, &'static str) {
+    let os = if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "darwin"
+    } else {
+        "linux"
+    };
+    let arch = if cfg!(target_arch = "x86_64") {
+        "x86_64"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86"
+    };
+    (os, arch)
 }
 
 #[cfg(test)]
@@ -137,6 +218,7 @@ mod tests {
             current: "0.1.0".into(),
             latest: "0.2.0".into(),
             download_url: "https://example.com".into(),
+            release_notes: String::new(),
         };
         let notice = UpdateChecker::format_update_notice(&info);
         assert!(notice.contains("0.1.0"));
@@ -151,6 +233,7 @@ mod tests {
             current: "0.1.0".into(),
             latest: "0.2.0".into(),
             download_url: "test".into(),
+            release_notes: String::new(),
         }));
         assert!(checker.cached_result().is_some());
     }
@@ -159,5 +242,14 @@ mod tests {
     fn test_with_interval() {
         let checker = UpdateChecker::new("0.1.0").with_interval(Duration::from_secs(60));
         assert_eq!(checker.check_interval, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_compare_versions() {
+        assert_eq!(compare_versions("0.2.0", "0.1.0"), 1);
+        assert_eq!(compare_versions("0.1.0", "0.2.0"), -1);
+        assert_eq!(compare_versions("0.1.0", "0.1.0"), 0);
+        assert_eq!(compare_versions("1.0.0", "0.9.9"), 1);
+        assert_eq!(compare_versions("0.1.2", "0.1.1"), 1);
     }
 }

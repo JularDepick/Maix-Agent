@@ -1,8 +1,14 @@
-//! Post-edit diagnostics using language-specific tools.
+//! LSP client and post-edit diagnostics.
 //!
-//! Instead of a full LSP client, this module runs command-line diagnostic tools
-//! (cargo check, pyright, tsc, gopls check, etc.) after file edits and returns
-//! structured diagnostics to the agent.
+//! Provides both CLI-based diagnostics (cargo check, pyright, tsc, etc.)
+//! and a full LSP client for go-to-definition, find-references, hover, etc.
+
+mod client;
+mod manager;
+pub mod tools;
+
+pub use client::LspClient;
+pub use manager::LspManager;
 
 use maix_core::MaixResult;
 use std::path::Path;
@@ -62,7 +68,6 @@ fn detect_tool(path: &Path) -> Option<(&'static str, Vec<&'static str>)> {
     match ext {
         "rs" => Some(("cargo", vec!["check", "--message-format=short"])),
         "py" => {
-            // Try pyright first, fall back to mypy
             if which("pyright") {
                 Some(("pyright", vec!["--outputjson"]))
             } else if which("mypy") {
@@ -134,7 +139,6 @@ pub async fn run_diagnostics(path: &Path, working_dir: &Path) -> MaixResult<Opti
         if output.status.success() {
             return Ok(None);
         }
-        // Non-zero exit but no parsed diagnostics — show raw output
         let trimmed = combined.trim();
         if trimmed.is_empty() {
             return Ok(None);
@@ -169,7 +173,6 @@ fn parse_diagnostics(tool: &str, output: &str, target_file: &Path) -> Vec<Diagno
 }
 
 /// Parse `cargo check --message-format=short` output.
-/// Format: `src/main.rs:15:5: warning: unused variable `x``
 fn parse_cargo_short(output: &str, _target: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     for line in output.lines() {
@@ -178,7 +181,6 @@ fn parse_cargo_short(output: &str, _target: &Path) -> Vec<Diagnostic> {
             continue;
         }
 
-        // Find the severity marker
         let (loc_and_severity, message) = if let Some(pos) = line.find(": error") {
             (&line[..pos], &line[pos + 2..])
         } else if let Some(pos) = line.find(": warning") {
@@ -189,13 +191,11 @@ fn parse_cargo_short(output: &str, _target: &Path) -> Vec<Diagnostic> {
             continue;
         };
 
-        // Split location: "src/main.rs:15:5"
         let loc_parts: Vec<&str> = loc_and_severity.split(':').collect();
         if loc_parts.len() < 2 {
             continue;
         }
 
-        // Extract severity from the message start
         let (severity, msg) = if message.starts_with("error") {
             (Severity::Error, &message[message.find(": ").map(|p| p + 2).unwrap_or(0)..])
         } else if message.starts_with("warning") {
@@ -221,7 +221,6 @@ fn parse_cargo_short(output: &str, _target: &Path) -> Vec<Diagnostic> {
 /// Parse pyright JSON output.
 fn parse_pyright_json(output: &str, _target: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-
     let json: serde_json::Value = match serde_json::from_str(output) {
         Ok(v) => v,
         Err(_) => return parse_fallback(output),
@@ -240,59 +239,34 @@ fn parse_pyright_json(output: &str, _target: &Path) -> Vec<Diagnostic> {
                 _ => Severity::Hint,
             };
             let message = d.get("message").and_then(|m| m.as_str()).unwrap_or("unknown").to_string();
-
-            diags.push(Diagnostic {
-                file: file.to_string(),
-                line,
-                column: col,
-                severity,
-                message,
-                source: "pyright".into(),
-            });
+            diags.push(Diagnostic { file: file.to_string(), line, column: col, severity, message, source: "pyright".into() });
         }
     }
-
     diags
 }
 
 /// Parse mypy output.
-/// Format: `main.py:5:1: error: Incompatible types in assignment  [assignment]`
 fn parse_mypy(output: &str, _target: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     for line in output.lines() {
         let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        // Find severity marker
+        if line.is_empty() { continue; }
         let (loc_part, rest) = if let Some(pos) = line.find(": error: ") {
             (&line[..pos], &line[pos + 9..])
         } else if let Some(pos) = line.find(": warning: ") {
             (&line[..pos], &line[pos + 11..])
         } else if let Some(pos) = line.find(": note: ") {
             (&line[..pos], &line[pos + 8..])
-        } else {
-            continue;
-        };
-
-        let severity = if line.contains(": error: ") {
-            Severity::Error
-        } else if line.contains(": warning: ") {
-            Severity::Warning
-        } else {
-            Severity::Info
-        };
-
+        } else { continue; };
+        let severity = if line.contains(": error: ") { Severity::Error }
+            else if line.contains(": warning: ") { Severity::Warning }
+            else { Severity::Info };
         let loc_parts: Vec<&str> = loc_part.split(':').collect();
-
         diags.push(Diagnostic {
             file: loc_parts[0].to_string(),
             line: loc_parts.get(1).and_then(|l| l.parse().ok()),
             column: loc_parts.get(2).and_then(|c| c.parse().ok()),
-            severity,
-            message: rest.to_string(),
-            source: "mypy".into(),
+            severity, message: rest.to_string(), source: "mypy".into(),
         });
     }
     diags
@@ -303,37 +277,24 @@ fn parse_tsc(output: &str, _target: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     for line in output.lines() {
         let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        // Format: file(line,col): error TS1234: message
+        if line.is_empty() { continue; }
         if let Some(paren_start) = line.find('(') {
             let file = &line[..paren_start];
             let rest = &line[paren_start + 1..];
             if let Some(paren_end) = rest.find(')') {
                 let loc = &rest[..paren_end];
-                let after = &rest[paren_end + 2..]; // skip ") "
-
+                let after = &rest[paren_end + 2..];
                 let loc_parts: Vec<&str> = loc.split(',').collect();
                 let after_parts: Vec<&str> = after.splitn(2, ": ").collect();
-
                 if after_parts.len() >= 2 {
-                    let severity = if after_parts[0].contains("error") {
-                        Severity::Error
-                    } else if after_parts[0].contains("warning") {
-                        Severity::Warning
-                    } else {
-                        Severity::Info
-                    };
-
+                    let severity = if after_parts[0].contains("error") { Severity::Error }
+                        else if after_parts[0].contains("warning") { Severity::Warning }
+                        else { Severity::Info };
                     diags.push(Diagnostic {
                         file: file.to_string(),
                         line: loc_parts.first().and_then(|l| l.parse().ok()),
                         column: loc_parts.get(1).and_then(|c| c.parse().ok()),
-                        severity,
-                        message: after_parts[1].to_string(),
-                        source: "tsc".into(),
+                        severity, message: after_parts[1].to_string(), source: "tsc".into(),
                     });
                 }
             }
@@ -347,39 +308,22 @@ fn parse_eslint(output: &str, _target: &Path) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     for line in output.lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with('/') {
-            continue;
-        }
-
-        // Format: file: line X, col Y, Severity - Message (rule)
+        if line.is_empty() || line.starts_with('/') { continue; }
         if let Some(line_pos) = line.find(" line ") {
             let file = &line[..line_pos];
             let rest = &line[line_pos + 6..];
-
             let parts: Vec<&str> = rest.splitn(4, ", ").collect();
             if parts.len() >= 4 {
-                let severity = if parts[2].contains("Error") {
-                    Severity::Error
-                } else if parts[2].contains("Warning") {
-                    Severity::Warning
-                } else {
-                    Severity::Info
-                };
-
+                let severity = if parts[2].contains("Error") { Severity::Error }
+                    else if parts[2].contains("Warning") { Severity::Warning }
+                    else { Severity::Info };
                 let msg = parts[3].trim_end_matches(')');
-                let msg = if let Some(paren) = msg.rfind(" (") {
-                    &msg[..paren]
-                } else {
-                    msg
-                };
-
+                let msg = if let Some(paren) = msg.rfind(" (") { &msg[..paren] } else { msg };
                 diags.push(Diagnostic {
                     file: file.to_string(),
                     line: parts[0].trim().parse().ok(),
                     column: parts[1].trim().strip_prefix("col ").and_then(|c| c.parse().ok()),
-                    severity,
-                    message: msg.to_string(),
-                    source: "eslint".into(),
+                    severity, message: msg.to_string(), source: "eslint".into(),
                 });
             }
         }
@@ -387,34 +331,19 @@ fn parse_eslint(output: &str, _target: &Path) -> Vec<Diagnostic> {
     diags
 }
 
-/// Parse gopls check output.
-fn parse_gopls(output: &str, _target: &Path) -> Vec<Diagnostic> {
-    parse_cargo_short(output, _target) // Same format as cargo short
-}
+fn parse_gopls(output: &str, _target: &Path) -> Vec<Diagnostic> { parse_cargo_short(output, _target) }
+fn parse_golangci_lint(output: &str, _target: &Path) -> Vec<Diagnostic> { parse_cargo_short(output, _target) }
 
-/// Parse golangci-lint output.
-fn parse_golangci_lint(output: &str, _target: &Path) -> Vec<Diagnostic> {
-    parse_cargo_short(output, _target) // Similar format
-}
-
-/// Fallback parser for unknown formats — extract any error/warning lines.
+/// Fallback parser for unknown formats.
 fn parse_fallback(output: &str) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     for line in output.lines() {
         let lower = line.to_lowercase();
         if lower.contains("error") || lower.contains("warning") {
-            let severity = if lower.contains("error") {
-                Severity::Error
-            } else {
-                Severity::Warning
-            };
+            let severity = if lower.contains("error") { Severity::Error } else { Severity::Warning };
             diags.push(Diagnostic {
-                file: String::new(),
-                line: None,
-                column: None,
-                severity,
-                message: line.trim().to_string(),
-                source: "unknown".into(),
+                file: String::new(), line: None, column: None, severity,
+                message: line.trim().to_string(), source: "unknown".into(),
             });
         }
     }
@@ -430,7 +359,6 @@ mod tests {
         let output = r#"src/main.rs:15:5: warning: unused variable `x`
 src/main.rs:23:10: error[E0308]: mismatched types
 src/lib.rs:5:1: warning: unused import `std::io`"#;
-
         let diags = parse_cargo_short(output, Path::new("src/main.rs"));
         assert_eq!(diags.len(), 3);
         assert_eq!(diags[0].severity, Severity::Warning);
@@ -443,7 +371,6 @@ src/lib.rs:5:1: warning: unused import `std::io`"#;
     fn test_parse_mypy() {
         let output = r#"main.py:5:1: error: Incompatible types in assignment  [assignment]
 main.py:10:5: warning: Unused import  [unused-import]"#;
-
         let diags = parse_mypy(output, Path::new("main.py"));
         assert_eq!(diags.len(), 2);
         assert_eq!(diags[0].severity, Severity::Error);
@@ -454,7 +381,6 @@ main.py:10:5: warning: Unused import  [unused-import]"#;
     fn test_parse_tsc() {
         let output = r#"src/app.ts(15,5): error TS2322: Type 'string' is not assignable to type 'number'.
 src/utils.ts(3,1): warning TS6133: 'foo' is declared but its value is never read."#;
-
         let diags = parse_tsc(output, Path::new("src/app.ts"));
         assert_eq!(diags.len(), 2);
         assert_eq!(diags[0].file, "src/app.ts");
@@ -465,12 +391,8 @@ src/utils.ts(3,1): warning TS6133: 'foo' is declared but its value is never read
     #[test]
     fn test_diagnostic_display() {
         let diag = Diagnostic {
-            file: "src/main.rs".into(),
-            line: Some(15),
-            column: Some(5),
-            severity: Severity::Warning,
-            message: "unused variable `x`".into(),
-            source: "cargo".into(),
+            file: "src/main.rs".into(), line: Some(15), column: Some(5),
+            severity: Severity::Warning, message: "unused variable `x`".into(), source: "cargo".into(),
         };
         let display = diag.display();
         assert!(display.contains("⚠"));
@@ -480,14 +402,10 @@ src/utils.ts(3,1): warning TS6133: 'foo' is declared but its value is never read
 
     #[test]
     fn test_detect_tool() {
-        // Rust always has cargo
         assert!(detect_tool(Path::new("main.rs")).is_some());
-        // Python/TS/Go depend on tools being installed
-        // Just verify the function doesn't panic
         detect_tool(Path::new("main.py"));
         detect_tool(Path::new("main.ts"));
         detect_tool(Path::new("main.go"));
-        // Unknown extension returns None
         assert!(detect_tool(Path::new("main.rb")).is_none());
     }
 }
