@@ -137,17 +137,14 @@ pub struct OrchestratorMetrics {
 
 /// Central monitor that collects agent state and publishes metrics.
 pub struct Monitor {
-    #[allow(dead_code)]
-    bus: Arc<EventBus>,
     agents: HashMap<String, AgentSnapshot>,
     metrics: OrchestratorMetrics,
     start_time: std::time::Instant,
 }
 
 impl Monitor {
-    pub fn new(bus: Arc<EventBus>) -> Self {
+    pub fn new(_bus: Arc<EventBus>) -> Self {
         Self {
-            bus,
             agents: HashMap::new(),
             metrics: OrchestratorMetrics::default(),
             start_time: std::time::Instant::now(),
@@ -253,5 +250,273 @@ mod tests {
 
         let (snaps, _) = monitor.snapshot();
         assert_eq!(snaps[0].stats.total_tokens, 300);
+    }
+
+    #[test]
+    fn test_monitor_deregister() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.register_agent("a1", "coder");
+        monitor.register_agent("a2", "reviewer");
+        assert_eq!(monitor.snapshot().1.total_agents, 2);
+
+        monitor.deregister_agent("a1");
+        assert_eq!(monitor.snapshot().1.total_agents, 1);
+    }
+
+    #[test]
+    fn test_monitor_task_done_failed() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.register_agent("a1", "coder");
+
+        monitor.handle_event(&AgentEvent::TaskDone {
+            agent_id: "a1".into(),
+            task_id: "t1".into(),
+            result: "ok".into(),
+        });
+        monitor.handle_event(&AgentEvent::TaskFailed {
+            agent_id: "a1".into(),
+            task_id: "t2".into(),
+            error: "fail".into(),
+        });
+
+        let (_, metrics) = monitor.snapshot();
+        assert_eq!(metrics.tasks_completed, 1);
+        assert_eq!(metrics.tasks_failed, 1);
+    }
+
+    #[test]
+    fn test_monitor_queue_changed() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.handle_event(&AgentEvent::QueueChanged {
+            depth: 42,
+            action: "enqueue".into(),
+        });
+        let (_, metrics) = monitor.snapshot();
+        assert_eq!(metrics.queue_depth, 42);
+    }
+
+    #[test]
+    fn test_monitor_idle_active_counts() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.register_agent("a1", "coder");
+        monitor.register_agent("a2", "reviewer");
+
+        // Both idle by default
+        let (_, metrics) = monitor.snapshot();
+        assert_eq!(metrics.idle_agents, 2);
+        assert_eq!(metrics.active_agents, 0);
+
+        // Move a1 to Thinking
+        monitor.handle_event(&AgentEvent::StateChanged {
+            agent_id: "a1".into(),
+            from: maix_core::AgentState::Idle,
+            to: maix_core::AgentState::Thinking,
+        });
+        let (_, metrics) = monitor.snapshot();
+        assert_eq!(metrics.idle_agents, 1);
+        assert_eq!(metrics.active_agents, 1);
+    }
+
+    #[test]
+    fn test_monitor_deregister_nonexistent() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.register_agent("a1", "coder");
+        monitor.deregister_agent("nonexistent"); // should be no-op
+        assert_eq!(monitor.snapshot().1.total_agents, 1);
+    }
+
+    #[test]
+    fn test_monitor_register_overwrite() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.register_agent("a1", "coder");
+        monitor.register_agent("a1", "reviewer"); // overwrite
+        assert_eq!(monitor.snapshot().1.total_agents, 1);
+        assert_eq!(monitor.snapshot().0[0].role, "reviewer");
+    }
+
+    #[test]
+    fn test_monitor_state_changed_nonexistent() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        // Should not panic
+        monitor.handle_event(&AgentEvent::StateChanged {
+            agent_id: "nonexistent".into(),
+            from: maix_core::AgentState::Idle,
+            to: maix_core::AgentState::Thinking,
+        });
+    }
+
+    #[test]
+    fn test_monitor_token_used() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.register_agent("a1", "coder");
+
+        monitor.handle_event(&AgentEvent::TokenUsed {
+            agent_id: "a1".into(),
+            prompt_tokens: 500,
+            completion_tokens: 200,
+            cost_estimate: 0.005,
+        });
+
+        let (snaps, metrics) = monitor.snapshot();
+        assert_eq!(snaps[0].stats.total_tokens, 700);
+        assert_eq!(snaps[0].stats.llm_calls, 1);
+        assert_eq!(metrics.total_tokens, 700);
+        assert!((metrics.total_cost - 0.005).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_monitor_uptime() {
+        let bus = Arc::new(EventBus::new(64));
+        let monitor = Monitor::new(bus);
+        let (_, metrics) = monitor.snapshot();
+        assert!(metrics.uptime_secs < 5); // should be near 0
+    }
+
+    #[test]
+    fn test_event_bus_sender() {
+        let bus = EventBus::new(16);
+        let tx = bus.sender();
+        // sender should be usable
+        let mut rx = bus.subscribe();
+        tx.send(AgentEvent::ToolCall {
+            agent_id: "a".into(),
+            tool: "read".into(),
+            args: serde_json::json!({}),
+            dur_ms: 0,
+        }).unwrap();
+        assert!(rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn test_handle_event_tool_call() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.register_agent("a1", "worker");
+        monitor.handle_event(&AgentEvent::ToolCall {
+            agent_id: "a1".into(),
+            tool: "read_file".into(),
+            args: serde_json::json!({}),
+            dur_ms: 100,
+        });
+    }
+
+    #[test]
+    fn test_handle_event_tool_result() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.register_agent("a1", "worker");
+        monitor.handle_event(&AgentEvent::ToolResult {
+            agent_id: "a1".into(),
+            tool: "read_file".into(),
+            result_preview: "ok".into(),
+        });
+    }
+
+    #[test]
+    fn test_handle_event_memory_saved() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.handle_event(&AgentEvent::MemorySaved {
+            key: "test".into(),
+            size_bytes: 100,
+        });
+    }
+
+    #[test]
+    fn test_handle_event_orchestrator_tick() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.handle_event(&AgentEvent::OrchestratorTick {
+            active_agents: 1,
+            queue_depth: 0,
+            total_tokens: 100,
+            total_cost: 0.001,
+        });
+    }
+
+    #[test]
+    fn test_handle_event_task_started() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.register_agent("a1", "worker");
+        monitor.handle_event(&AgentEvent::TaskStarted {
+            agent_id: "a1".into(),
+            task_id: "t1".into(),
+        });
+    }
+
+    #[test]
+    fn test_snapshot_empty_monitor() {
+        let bus = Arc::new(EventBus::new(64));
+        let monitor = Monitor::new(bus);
+        let (snaps, metrics) = monitor.snapshot();
+        assert!(snaps.is_empty());
+        assert_eq!(metrics.total_agents, 0);
+        assert_eq!(metrics.total_tokens, 0);
+    }
+
+    #[test]
+    fn test_cumulative_token_tracking() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.register_agent("a1", "worker");
+        monitor.handle_event(&AgentEvent::TokenUsed {
+            agent_id: "a1".into(),
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            cost_estimate: 0.001,
+        });
+        monitor.handle_event(&AgentEvent::TokenUsed {
+            agent_id: "a1".into(),
+            prompt_tokens: 200,
+            completion_tokens: 100,
+            cost_estimate: 0.002,
+        });
+        let (snaps, metrics) = monitor.snapshot();
+        assert_eq!(snaps[0].stats.total_tokens, 450); // (100+50) + (200+100)
+        assert_eq!(snaps[0].stats.llm_calls, 2);
+        assert_eq!(metrics.total_tokens, 450);
+        assert!((metrics.total_cost - 0.003).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_orchestrator_metrics_default() {
+        let metrics = OrchestratorMetrics::default();
+        assert_eq!(metrics.total_agents, 0);
+        assert_eq!(metrics.total_tokens, 0);
+        assert_eq!(metrics.total_cost, 0.0);
+        assert_eq!(metrics.tasks_completed, 0);
+        assert_eq!(metrics.tasks_failed, 0);
+        assert_eq!(metrics.queue_depth, 0);
+    }
+
+    #[test]
+    fn test_session_stats_default() {
+        let stats = SessionStats::default();
+        assert_eq!(stats.total_tokens, 0);
+        assert_eq!(stats.total_cost, 0.0);
+        assert_eq!(stats.total_rounds, 0);
+        assert_eq!(stats.tool_calls, 0);
+    }
+
+    #[test]
+    fn test_register_agent_default_fields() {
+        let bus = Arc::new(EventBus::new(64));
+        let mut monitor = Monitor::new(bus);
+        monitor.register_agent("a1", "coder");
+        let (snaps, _) = monitor.snapshot();
+        assert_eq!(snaps.len(), 1);
+        assert_eq!(snaps[0].agent_id, "a1");
+        assert_eq!(snaps[0].role, "coder");
+        assert!(snaps[0].current_task.is_none());
+        assert_eq!(snaps[0].stats.total_tokens, 0);
     }
 }

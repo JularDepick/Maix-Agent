@@ -14,10 +14,45 @@ impl std::fmt::Display for ConfigError {
     }
 }
 
+/// Default known model prefixes.
+pub const DEFAULT_MODEL_PREFIXES: &[&str] = &[
+    "gpt-", "claude-", "deepseek", "gemini", "auto",
+    "qwen", "llama", "mistral", "mixtral", "phi-",
+    "command-r", "yi-", "internlm", "glm-", "baichuan",
+    "moonshot", "doubao", "spark", "hunyuan", "minimax",
+];
+
 /// Validates configuration values.
-pub struct ConfigValidator;
+pub struct ConfigValidator {
+    /// Known model prefixes (configurable).
+    known_model_prefixes: Vec<String>,
+}
 
 impl ConfigValidator {
+    /// Create a validator with default known model prefixes.
+    pub fn new() -> Self {
+        Self {
+            known_model_prefixes: DEFAULT_MODEL_PREFIXES.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// Create a validator with custom known model prefixes.
+    pub fn with_model_prefixes(prefixes: Vec<String>) -> Self {
+        Self {
+            known_model_prefixes: prefixes,
+        }
+    }
+
+    /// Add additional model prefixes to the known list.
+    pub fn add_model_prefixes(mut self, prefixes: &[&str]) -> Self {
+        for p in prefixes {
+            if !self.known_model_prefixes.contains(&p.to_string()) {
+                self.known_model_prefixes.push(p.to_string());
+            }
+        }
+        self
+    }
+
     /// Validate a TOML config string.
     pub fn validate_toml(content: &str) -> Result<toml::Value, Vec<ConfigError>> {
         toml::from_str(content).map_err(|e| {
@@ -30,7 +65,7 @@ impl ConfigValidator {
     }
 
     /// Validate required fields in a parsed TOML value.
-    pub fn validate_fields(config: &toml::Value) -> Vec<ConfigError> {
+    pub fn validate_fields(&self, config: &toml::Value) -> Vec<ConfigError> {
         let mut errors = Vec::new();
 
         // Check [provider] section
@@ -54,14 +89,13 @@ name = "openai""#
 
         // Check model field
         if let Some(model) = config.get("model").and_then(|m| m.as_str()) {
-            let valid_prefixes = ["gpt-", "claude-", "deepseek", "gemini", "auto"];
-            if !valid_prefixes.iter().any(|p| model.starts_with(p)) {
+            if !self.known_model_prefixes.iter().any(|p| model.starts_with(p.as_str())) {
                 errors.push(ConfigError {
                     field: "model".into(),
                     message: format!("Unknown model: '{}'", model),
                     fix: format!(
-                        "Valid models start with: {}",
-                        valid_prefixes.join(", ")
+                        "Known model prefixes: {}",
+                        self.known_model_prefixes.join(", ")
                     ),
                 });
             }
@@ -82,7 +116,7 @@ name = "openai""#
     }
 
     /// Validate a config file and return all errors.
-    pub fn validate_file(path: &std::path::Path) -> Result<toml::Value, Vec<ConfigError>> {
+    pub fn validate_file(&self, path: &std::path::Path) -> Result<toml::Value, Vec<ConfigError>> {
         let content = std::fs::read_to_string(path).map_err(|e| {
             vec![ConfigError {
                 field: "file".into(),
@@ -92,12 +126,18 @@ name = "openai""#
         })?;
 
         let config = Self::validate_toml(&content)?;
-        let field_errors = Self::validate_fields(&config);
+        let field_errors = self.validate_fields(&config);
         if field_errors.is_empty() {
             Ok(config)
         } else {
             Err(field_errors)
         }
+    }
+}
+
+impl Default for ConfigValidator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -123,31 +163,33 @@ model = "gpt-4o"
 
     #[test]
     fn test_validate_missing_provider() {
+        let validator = ConfigValidator::new();
         let config: toml::Value = toml::from_str("model = 'gpt-4o'").unwrap();
-        let errors = ConfigValidator::validate_fields(&config);
+        let errors = validator.validate_fields(&config);
         assert!(errors.iter().any(|e| e.field == "provider"));
     }
 
     #[test]
     fn test_validate_missing_provider_name() {
+        let validator = ConfigValidator::new();
         let config: toml::Value = toml::from_str("[provider]\napi_base = 'test'").unwrap();
-        let errors = ConfigValidator::validate_fields(&config);
+        let errors = validator.validate_fields(&config);
         assert!(errors.iter().any(|e| e.field == "provider.name"));
     }
 
     #[test]
     fn test_validate_unknown_model() {
+        let validator = ConfigValidator::new();
         let config: toml::Value =
-            toml::from_str("[provider]\nname = 'openai'\n[model]\nname = 'foobar-xyz'")
+            toml::from_str("model = 'foobar-xyz'\n[provider]\nname = 'openai'")
                 .unwrap();
-        // model validation depends on where the field is
-        let errors = ConfigValidator::validate_fields(&config);
-        // just checking it doesn't panic
-        let _ = errors;
+        let errors = validator.validate_fields(&config);
+        assert!(errors.iter().any(|e| e.field == "model"));
     }
 
     #[test]
     fn test_validate_valid_config() {
+        let validator = ConfigValidator::new();
         let config: toml::Value = toml::from_str(
             r#"
 [provider]
@@ -160,8 +202,7 @@ api_key = "sk-test"
 "#,
         )
         .unwrap();
-        let errors = ConfigValidator::validate_fields(&config);
-        // Should have no provider errors at least
+        let errors = validator.validate_fields(&config);
         assert!(!errors.iter().any(|e| e.field == "provider"));
     }
 
@@ -176,5 +217,68 @@ api_key = "sk-test"
         assert!(display.contains("test"));
         assert!(display.contains("msg"));
         assert!(display.contains("fix"));
+    }
+
+    #[test]
+    fn test_custom_model_prefixes() {
+        let validator = ConfigValidator::with_model_prefixes(vec!["my-custom-".into()]);
+        let config: toml::Value = toml::from_str(
+            r#"[provider]
+name = "custom"
+model = "my-custom-v1"
+api_key = "k"
+"#,
+        )
+        .unwrap();
+        let errors = validator.validate_fields(&config);
+        assert!(!errors.iter().any(|e| e.field == "model"));
+    }
+
+    #[test]
+    fn test_custom_prefix_rejects_unknown() {
+        let validator = ConfigValidator::with_model_prefixes(vec!["my-custom-".into()]);
+        let config: toml::Value = toml::from_str(
+            r#"
+model = "gpt-4o"
+[provider]
+name = "custom"
+api_key = "k"
+"#,
+        )
+        .unwrap();
+        let errors = validator.validate_fields(&config);
+        assert!(errors.iter().any(|e| e.field == "model"));
+    }
+
+    #[test]
+    fn test_add_model_prefixes() {
+        let validator = ConfigValidator::new().add_model_prefixes(&["custom-", "other-"]);
+        let config: toml::Value = toml::from_str(
+            r#"
+model = "custom-v1"
+[provider]
+name = "custom"
+api_key = "k"
+"#,
+        )
+        .unwrap();
+        let errors = validator.validate_fields(&config);
+        assert!(!errors.iter().any(|e| e.field == "model"));
+    }
+
+    #[test]
+    fn test_default_prefixes_include_common() {
+        let validator = ConfigValidator::new();
+        let config: toml::Value = toml::from_str(
+            r#"
+model = "qwen-turbo"
+[provider]
+name = "openai"
+api_key = "k"
+"#,
+        )
+        .unwrap();
+        let errors = validator.validate_fields(&config);
+        assert!(!errors.iter().any(|e| e.field == "model"));
     }
 }

@@ -102,6 +102,8 @@ pub mod named_pipe_transport {
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
+    type PendingConnection = Option<Pin<Box<dyn std::future::Future<Output = Result<NamedPipeConnection, std::io::Error>> + Send>>>;
+
     /// A Named Pipe listener that yields `NamedPipeConnection` instances.
     pub struct NamedPipeListener {
         pipe_name: String,
@@ -167,7 +169,7 @@ pub mod named_pipe_transport {
     /// Stream adapter for tonic's `serve_with_incoming`.
     pub struct NamedPipeListenerStream {
         listener: NamedPipeListener,
-        pending: Option<Pin<Box<dyn std::future::Future<Output = Result<NamedPipeConnection, std::io::Error>> + Send>>>,
+        pending: PendingConnection,
     }
 
     impl NamedPipeListenerStream {
@@ -198,5 +200,30 @@ pub mod named_pipe_transport {
                 }));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_socket_path() {
+        let path = default_socket_path();
+        assert!(!path.as_os_str().is_empty());
+        #[cfg(target_os = "windows")]
+        assert!(path.to_str().unwrap().contains("pipe"));
+    }
+
+    #[test]
+    fn test_default_pipe_name() {
+        let name = default_pipe_name();
+        assert_eq!(name, r"\\.\pipe\maix");
+    }
+
+    #[test]
+    fn test_home_dir() {
+        let dir = home_dir();
+        assert!(!dir.as_os_str().is_empty());
     }
 }

@@ -112,11 +112,25 @@ pub struct BatchEmbedder {
     provider: Arc<dyn EmbeddingProvider>,
     buffer: Mutex<Vec<(String, tokio::sync::oneshot::Sender<Option<Embedding>>)>>,
     batch_size: usize,
+    flush_interval: std::time::Duration,
+    last_flush: Mutex<std::time::Instant>,
 }
 
 impl BatchEmbedder {
     pub fn new(provider: Arc<dyn EmbeddingProvider>, batch_size: usize) -> Self {
-        Self { provider, buffer: Mutex::new(Vec::new()), batch_size }
+        Self {
+            provider,
+            buffer: Mutex::new(Vec::new()),
+            batch_size,
+            flush_interval: std::time::Duration::from_secs(5),
+            last_flush: Mutex::new(std::time::Instant::now()),
+        }
+    }
+
+    /// Set the flush interval for time-based flushing.
+    pub fn with_flush_interval(mut self, interval: std::time::Duration) -> Self {
+        self.flush_interval = interval;
+        self
     }
 
     /// Enqueue a single text for embedding. Returns when the batch is flushed.
@@ -125,9 +139,14 @@ impl BatchEmbedder {
         {
             let mut buf = self.buffer.lock().await;
             buf.push((text.to_string(), tx));
-            if buf.len() >= self.batch_size {
+
+            let should_flush = buf.len() >= self.batch_size
+                || self.last_flush.lock().await.elapsed() >= self.flush_interval;
+
+            if should_flush {
                 let batch = std::mem::take(&mut *buf);
-                drop(buf); // release lock before async work
+                *self.last_flush.lock().await = std::time::Instant::now();
+                drop(buf);
                 self.flush_batch(batch).await;
             }
         }
@@ -155,6 +174,75 @@ impl BatchEmbedder {
         for ((_, tx), emb) in batch.into_iter().zip(embedding_iter) {
             let _ = tx.send(if emb.is_empty() { None } else { Some(emb) });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cosine_similarity_identical() {
+        let v = vec![1.0, 0.0, 0.0];
+        assert!((cosine_similarity(&v, &v) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_cosine_similarity_orthogonal() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        assert!((cosine_similarity(&a, &b)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_cosine_similarity_opposite() {
+        let a = vec![1.0, 0.0];
+        let b = vec![-1.0, 0.0];
+        assert!((cosine_similarity(&a, &b) + 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_cosine_similarity_zero_vector() {
+        let a = vec![0.0, 0.0];
+        let b = vec![1.0, 0.0];
+        assert_eq!(cosine_similarity(&a, &b), 0.0);
+    }
+
+    #[test]
+    fn test_cosine_similarity_symmetric() {
+        let a = vec![0.5, 0.3, 0.8];
+        let b = vec![0.2, 0.9, 0.1];
+        assert!((cosine_similarity(&a, &b) - cosine_similarity(&b, &a)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_api_embedding_provider_dims() {
+        let provider = APIEmbeddingProvider::new(
+            "http://localhost".into(), "key".into(), "model".into()
+        );
+        assert_eq!(provider.dims(), 1536);
+
+        let provider = provider.with_dims(768);
+        assert_eq!(provider.dims(), 768);
+    }
+
+    #[test]
+    fn test_batch_embedder_flush_interval_config() {
+        let provider = Arc::new(APIEmbeddingProvider::new(
+            "http://localhost".into(), "key".into(), "model".into()
+        ));
+        let embedder = BatchEmbedder::new(provider, 10)
+            .with_flush_interval(std::time::Duration::from_secs(10));
+        assert_eq!(embedder.flush_interval, std::time::Duration::from_secs(10));
+    }
+
+    #[test]
+    fn test_batch_embedder_default_interval() {
+        let provider = Arc::new(APIEmbeddingProvider::new(
+            "http://localhost".into(), "key".into(), "model".into()
+        ));
+        let embedder = BatchEmbedder::new(provider, 10);
+        assert_eq!(embedder.flush_interval, std::time::Duration::from_secs(5));
     }
 }
 

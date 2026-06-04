@@ -221,4 +221,46 @@ mod tests {
         let results = checker.run_all();
         assert_eq!(results[0].status, CheckStatus::Pass);
     }
+
+    #[test]
+    fn test_all_pass_when_all_pass() {
+        let mut checker = HealthChecker::new();
+        checker.add_check(|| CheckResult {
+            name: "a".into(),
+            status: CheckStatus::Pass,
+            message: "ok".into(),
+            fix_hint: None,
+        });
+        checker.add_check(|| CheckResult {
+            name: "b".into(),
+            status: CheckStatus::Pass,
+            message: "ok".into(),
+            fix_hint: None,
+        });
+        assert!(checker.all_pass());
+    }
+
+    #[test]
+    fn test_all_pass_when_some_fail() {
+        let mut checker = HealthChecker::new();
+        checker.add_check(|| CheckResult {
+            name: "a".into(),
+            status: CheckStatus::Pass,
+            message: "ok".into(),
+            fix_hint: None,
+        });
+        checker.add_check(|| CheckResult {
+            name: "b".into(),
+            status: CheckStatus::Fail,
+            message: "broken".into(),
+            fix_hint: Some("fix it".into()),
+        });
+        assert!(!checker.all_pass());
+    }
+
+    #[test]
+    fn test_all_pass_empty() {
+        let checker = HealthChecker::new();
+        assert!(checker.all_pass()); // vacuously true
+    }
 }

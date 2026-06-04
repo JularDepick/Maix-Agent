@@ -20,7 +20,8 @@ serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
 async-stream.workspace = true
-uuid = { version = "1", features = ["v4"] }
+uuid.workspace = true
 chrono.workspace = true
 futures.workspace = true
 tower-http = { version = "0.5", features = ["cors"] }
+reqwest.workspace = true

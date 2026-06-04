@@ -286,6 +286,8 @@ impl CoreService for MaixCoreService {
 
         let sid = session_id.clone();
         let cancel = self.0.cancel_root.child_token();
+        let pending_mode: Arc<tokio::sync::Mutex<Option<maix_agent::AgentMode>>> =
+            Arc::new(tokio::sync::Mutex::new(None));
 
         // Spawn agent run
         let run_agent = agent.clone();
@@ -350,6 +352,7 @@ impl CoreService for MaixCoreService {
         let inb_cancel = cancel.clone();
         let core = self.0.clone();
         let inb_sid = sid.clone();
+        let inb_pending_mode = pending_mode.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -362,8 +365,9 @@ impl CoreService for MaixCoreService {
                                 inb_cancel.cancel();
                                 break;
                             }
-                            Ok(Some(chat_stream::InboundEvent::SetMode(_mode))) => {
+                            Ok(Some(chat_stream::InboundEvent::SetMode(mode))) => {
                                 // Applied after run completes
+                                *inb_pending_mode.lock().await = Some(mode);
                             }
                             Ok(Some(chat_stream::InboundEvent::UserMessage { .. })) => {
                                 core.sessions.increment_message_count(&inb_sid).await;
@@ -392,14 +396,19 @@ impl CoreService for MaixCoreService {
             }
         }
 
-        // Put agent back into session slot
-        let inner_agent = match Arc::try_unwrap(agent) {
+        // Apply pending mode change before returning agent to session
+        let mut inner_agent = match Arc::try_unwrap(agent) {
             Ok(m) => m.into_inner(),
             Err(_) => {
                 tracing::warn!("agent had outstanding references; creating fresh agent for session");
                 self.0.build_agent(&sid, std::env::current_dir().unwrap_or_default()).await
             }
         };
+
+        if let Some(mode) = pending_mode.lock().await.take() {
+            tracing::info!("applying mode change to {:?} for session {}", mode, sid);
+            inner_agent.config.mode = mode;
+        }
 
         if let Some(h) = self.0.sessions.get(&sid).await {
             let mut lock = h.agent.lock().await;
@@ -1111,7 +1120,7 @@ impl CoreService for MaixCoreService {
                 .await;
 
             // Submit the task
-            let task_id = orch.submit(&arch.name, &input, 10, None);
+            let task_id = orch.submit(&arch.name, &input, 10, None).await;
 
             // Run orchestrator tick loop
             loop {
@@ -1424,5 +1433,71 @@ fn parse_position(s: &str) -> InsertAt {
         s if s.starts_with("after:") => InsertAt::After(s[6..].to_string()),
         s if s.starts_with("before:") => InsertAt::Before(s[7..].to_string()),
         _ => InsertAt::Tail,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_risk_to_pb() {
+        assert_eq!(risk_to_pb(RiskLevel::ReadOnly), 1);
+        assert_eq!(risk_to_pb(RiskLevel::Write), 2);
+        assert_eq!(risk_to_pb(RiskLevel::Network), 3);
+        assert_eq!(risk_to_pb(RiskLevel::Shell), 4);
+    }
+
+    #[test]
+    fn test_memory_kind_to_pb() {
+        assert_eq!(memory_kind_to_pb(maix_memory::MemoryKind::Episodic), 1);
+        assert_eq!(memory_kind_to_pb(maix_memory::MemoryKind::Semantic), 2);
+        assert_eq!(memory_kind_to_pb(maix_memory::MemoryKind::Working), 3);
+    }
+
+    #[test]
+    fn test_pb_memory_kind_valid() {
+        assert!(matches!(pb_memory_kind(1), maix_memory::MemoryKind::Episodic));
+        assert!(matches!(pb_memory_kind(2), maix_memory::MemoryKind::Semantic));
+        assert!(matches!(pb_memory_kind(3), maix_memory::MemoryKind::Working));
+    }
+
+    #[test]
+    fn test_pb_memory_kind_unknown_defaults_semantic() {
+        assert!(matches!(pb_memory_kind(0), maix_memory::MemoryKind::Semantic));
+        assert!(matches!(pb_memory_kind(99), maix_memory::MemoryKind::Semantic));
+        assert!(matches!(pb_memory_kind(-1), maix_memory::MemoryKind::Semantic));
+    }
+
+    #[test]
+    fn test_parse_position_head() {
+        assert!(matches!(parse_position("head"), InsertAt::Head));
+    }
+
+    #[test]
+    fn test_parse_position_tail() {
+        assert!(matches!(parse_position("tail"), InsertAt::Tail));
+    }
+
+    #[test]
+    fn test_parse_position_after() {
+        match parse_position("after:task-1") {
+            InsertAt::After(id) => assert_eq!(id, "task-1"),
+            _ => panic!("expected After"),
+        }
+    }
+
+    #[test]
+    fn test_parse_position_before() {
+        match parse_position("before:task-2") {
+            InsertAt::Before(id) => assert_eq!(id, "task-2"),
+            _ => panic!("expected Before"),
+        }
+    }
+
+    #[test]
+    fn test_parse_position_unknown_defaults_tail() {
+        assert!(matches!(parse_position("invalid"), InsertAt::Tail));
+        assert!(matches!(parse_position(""), InsertAt::Tail));
     }
 }

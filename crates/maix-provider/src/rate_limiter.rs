@@ -22,7 +22,7 @@ impl RateLimiter {
 
     /// Check if a request is allowed. If not, returns the duration to wait.
     pub fn check(&self) -> Result<(), Duration> {
-        let mut window = self.window.lock().unwrap();
+        let mut window = self.window.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
 
         // Remove expired entries (older than 1 minute)
@@ -162,7 +162,9 @@ fn is_retryable_error(error: &str) -> bool {
 
 /// Calculate exponential backoff delay.
 fn calculate_backoff(attempt: u32, config: &RetryConfig) -> Duration {
-    let exponential = config.base_delay * 2u32.pow(attempt);
+    let shift = attempt.min(31);
+    let multiplier = 1u64 << shift;
+    let exponential = config.base_delay * multiplier.min(u32::MAX as u64) as u32;
     std::cmp::min(exponential, config.max_delay)
 }
 

@@ -205,4 +205,24 @@ mod tests {
         let mut chain = ProviderChain::new(entries);
         assert!(!chain.fallback()); // can't fallback
     }
+
+    #[test]
+    fn test_chain_current_model() {
+        let chain = ProviderChain::new(sample_entries());
+        assert_eq!(chain.current_model(), "gpt-4o");
+    }
+
+    #[test]
+    fn test_chain_current_model_none_when_all_disabled() {
+        let entries = vec![ProviderEntry {
+            name: "a".into(),
+            model: "m1".into(),
+            priority: 1,
+            enabled: false,
+        }];
+        let chain = ProviderChain::new(entries);
+        assert_eq!(chain.current_model(), "none");
+        assert_eq!(chain.current_name(), "none");
+        assert!(chain.current().is_none());
+    }
 }

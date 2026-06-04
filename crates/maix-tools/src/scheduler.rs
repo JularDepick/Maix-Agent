@@ -68,7 +68,7 @@ impl CronExpr {
             if self.matches(&candidate) {
                 return candidate;
             }
-            candidate = candidate + chrono::Duration::minutes(1);
+            candidate += chrono::Duration::minutes(1);
         }
         // Fallback: return 1 hour from now
         *after + chrono::Duration::hours(1)
@@ -271,7 +271,9 @@ impl Scheduler {
         };
 
         if let Ok(content) = serde_json::to_string_pretty(&tasks) {
-            let _ = std::fs::write(&path, content);
+            if let Err(e) = std::fs::write(&path, content) {
+                tracing::warn!("Failed to persist cron jobs: {e}");
+            }
         }
     }
 
@@ -739,7 +741,7 @@ impl Tool for ScheduleWakeupTool {
             .ok_or_else(|| maix_core::MaixError::Tool("missing 'delay_seconds'".into()))?;
         let prompt = args["prompt"].as_str().unwrap_or("").to_string();
 
-        if delay < 60 || delay > 3600 {
+        if !(60..=3600).contains(&delay) {
             return Err(maix_core::MaixError::Tool("delay_seconds must be between 60 and 3600".into()));
         }
 

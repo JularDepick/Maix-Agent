@@ -1,10 +1,10 @@
-#![allow(dead_code)]
 //! Diff visualization — unified, side-by-side, and word-level diff rendering.
 
 use std::fmt;
 
 /// A single diff line with its type.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum DiffLine {
     /// Context line (unchanged).
     Context(String),
@@ -16,6 +16,7 @@ pub enum DiffLine {
     Separator,
 }
 
+#[allow(dead_code)]
 impl DiffLine {
     pub fn text(&self) -> &str {
         match self {
@@ -36,6 +37,7 @@ impl DiffLine {
 
 /// A diff hunk with line ranges.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DiffHunk {
     pub old_start: usize,
     pub old_count: usize,
@@ -46,12 +48,14 @@ pub struct DiffHunk {
 
 /// Diff statistics.
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct DiffStats {
     pub files_changed: usize,
     pub insertions: usize,
     pub deletions: usize,
 }
 
+#[allow(dead_code)]
 impl DiffStats {
     pub fn format_short(&self) -> String {
         format!(
@@ -72,17 +76,21 @@ pub enum DiffMode {
     /// Standard unified diff.
     Unified,
     /// Side-by-side comparison.
+    #[allow(dead_code)]
     SideBySide,
     /// Word-level highlighting.
+    #[allow(dead_code)]
     WordLevel,
 }
 
 /// Diff renderer.
 pub struct DiffRenderer {
     mode: DiffMode,
+    #[allow(dead_code)]
     context_lines: usize,
 }
 
+#[allow(dead_code)]
 impl DiffRenderer {
     pub fn new(mode: DiffMode) -> Self {
         Self {
@@ -303,12 +311,14 @@ impl fmt::Display for DiffRenderer {
     }
 }
 
+#[allow(dead_code)]
 fn format_line_pair(left: &str, right: &str, left_mark: char, right_mark: char, half: usize) -> String {
     let l = truncate_display(left, half);
     let r = truncate_display(right, half);
     format!("{}{:<width$} │ {}{:<width$}\n", left_mark, l, right_mark, r, width = half)
 }
 
+#[allow(dead_code)]
 fn truncate_display(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
@@ -318,6 +328,7 @@ fn truncate_display(s: &str, max: usize) -> String {
 }
 
 /// Compute LCS indices between two slices.
+#[allow(dead_code)]
 fn lcs_indices(old: &[&str], new: &[&str]) -> Vec<(usize, usize)> {
     let n = old.len();
     let m = new.len();
@@ -354,6 +365,7 @@ fn lcs_indices(old: &[&str], new: &[&str]) -> Vec<(usize, usize)> {
 }
 
 /// Format a diff stats line for git-style output.
+#[allow(dead_code)]
 pub fn format_diff_summary(file: &str, stats: &DiffStats) -> String {
     format!(" {} | {} {}", file, stats.insertions + stats.deletions, {
         let mut s = String::new();

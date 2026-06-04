@@ -4,6 +4,7 @@
 //! components (agent, tools, TUI, server).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 /// Event severity levels.
@@ -138,8 +139,8 @@ struct Subscription {
 pub struct EventBus {
     subscriptions: RwLock<HashMap<SubscriptionId, Subscription>>,
     log: RwLock<Vec<Event>>,
-    next_id: RwLock<u64>,
-    next_sub_id: RwLock<SubscriptionId>,
+    next_id: AtomicU64,
+    next_sub_id: AtomicU64,
     max_log_size: usize,
 }
 
@@ -148,8 +149,8 @@ impl EventBus {
         Self {
             subscriptions: RwLock::new(HashMap::new()),
             log: RwLock::new(Vec::new()),
-            next_id: RwLock::new(1),
-            next_sub_id: RwLock::new(1),
+            next_id: AtomicU64::new(1),
+            next_sub_id: AtomicU64::new(1),
             max_log_size,
         }
     }
@@ -163,12 +164,7 @@ impl EventBus {
         message: &str,
         data: HashMap<String, String>,
     ) -> u64 {
-        let id = {
-            let mut next = self.next_id.write().unwrap();
-            let id = *next;
-            *next += 1;
-            id
-        };
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
         let event = Event {
             id,
@@ -181,7 +177,7 @@ impl EventBus {
         };
 
         // Notify subscribers
-        let subs = self.subscriptions.read().unwrap();
+        let subs = self.subscriptions.read().unwrap_or_else(|e| e.into_inner());
         for sub in subs.values() {
             if sub.filter.matches(&event) {
                 (sub.handler)(&event);
@@ -190,7 +186,7 @@ impl EventBus {
 
         // Log event
         {
-            let mut log = self.log.write().unwrap();
+            let mut log = self.log.write().unwrap_or_else(|e| e.into_inner());
             if log.len() >= self.max_log_size {
                 log.remove(0);
             }
@@ -202,29 +198,27 @@ impl EventBus {
 
     /// Subscribe to events matching a filter. Returns a subscription ID.
     pub fn subscribe(&self, filter: EventFilter, handler: EventHandler) -> SubscriptionId {
-        let mut subs = self.subscriptions.write().unwrap();
-        let mut next = self.next_sub_id.write().unwrap();
-        let id = *next;
-        *next += 1;
+        let id = self.next_sub_id.fetch_add(1, Ordering::Relaxed);
+        let mut subs = self.subscriptions.write().unwrap_or_else(|e| e.into_inner());
         subs.insert(id, Subscription { filter, handler });
         id
     }
 
     /// Unsubscribe a handler.
     pub fn unsubscribe(&self, id: SubscriptionId) -> bool {
-        let mut subs = self.subscriptions.write().unwrap();
+        let mut subs = self.subscriptions.write().unwrap_or_else(|e| e.into_inner());
         subs.remove(&id).is_some()
     }
 
     /// Get recent events from the log.
     pub fn recent(&self, count: usize) -> Vec<Event> {
-        let log = self.log.read().unwrap();
+        let log = self.log.read().unwrap_or_else(|e| e.into_inner());
         log.iter().rev().take(count).cloned().collect()
     }
 
     /// Get events matching a filter from the log.
     pub fn query(&self, filter: &EventFilter, limit: usize) -> Vec<Event> {
-        let log = self.log.read().unwrap();
+        let log = self.log.read().unwrap_or_else(|e| e.into_inner());
         log.iter()
             .rev()
             .filter(|e| filter.matches(e))
@@ -235,7 +229,7 @@ impl EventBus {
 
     /// Count events in log.
     pub fn log_size(&self) -> usize {
-        self.log.read().unwrap().len()
+        self.log.read().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     /// Format recent events for display.

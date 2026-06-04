@@ -144,8 +144,6 @@ pub struct Orchestrator {
     pub queue: Arc<RwLock<TaskQueue>>,
     pub mode: OrchestrationMode,
     pub memory: Option<Box<dyn MemoryStore>>,
-    #[allow(dead_code)]
-    results: HashMap<TaskId, Vec<String>>,
 }
 
 impl Orchestrator {
@@ -155,7 +153,6 @@ impl Orchestrator {
             queue: Arc::new(RwLock::new(TaskQueue::new())),
             mode,
             memory: None,
-            results: HashMap::new(),
         }
     }
 
@@ -189,7 +186,7 @@ impl Orchestrator {
         id
     }
 
-    pub fn submit(&mut self, description: &str, input: &str, priority: u8, _role: Option<&str>) -> TaskId {
+    pub async fn submit(&mut self, description: &str, input: &str, priority: u8, _role: Option<&str>) -> TaskId {
         let task = Task {
             id: uuid::Uuid::new_v4().to_string(),
             description: description.into(),
@@ -201,13 +198,14 @@ impl Orchestrator {
             created_at: std::time::Instant::now(),
         };
         let id = task.id.clone();
-        if let Ok(mut q) = self.queue.try_write() {
+        {
+            let mut q = self.queue.write().await;
             q.enqueue(task);
         }
         id
     }
 
-    pub fn submit_at(
+    pub async fn submit_at(
         &mut self,
         description: &str,
         input: &str,
@@ -225,7 +223,8 @@ impl Orchestrator {
             created_at: std::time::Instant::now(),
         };
         let id = task.id.clone();
-        if let Ok(mut q) = self.queue.try_write() {
+        {
+            let mut q = self.queue.write().await;
             q.insert(task, at)?;
         }
         Ok(id)
@@ -260,7 +259,8 @@ impl Orchestrator {
                                 output,
                                 success: true,
                             });
-                            if let Ok(mut q) = self.queue.try_write() {
+                            {
+                                let mut q = self.queue.write().await;
                                 let _ = q.complete(&task_id, true);
                             }
                         }
@@ -271,7 +271,8 @@ impl Orchestrator {
                                 output: e.to_string(),
                                 success: false,
                             });
-                            if let Ok(mut q) = self.queue.try_write() {
+                            {
+                                let mut q = self.queue.write().await;
                                 let _ = q.complete(&task_id, false);
                             }
                         }
@@ -280,7 +281,8 @@ impl Orchestrator {
                     handle.is_busy = false;
                 }
                 None => {
-                    if let Ok(mut q) = self.queue.try_write() {
+                    {
+                        let mut q = self.queue.write().await;
                         let _ = q.insert(task.task, InsertAt::Head);
                     }
                     break;
@@ -324,10 +326,10 @@ mod tests {
         assert_eq!(reviewer.max_iter, 6);
     }
 
-    #[test]
-    fn test_orchestrator_submit() {
+    #[tokio::test]
+    async fn test_orchestrator_submit() {
         let mut orch = Orchestrator::new(OrchestrationMode::Hierarchical);
-        let id = orch.submit("test task", "hello", 5, None);
+        let id = orch.submit("test task", "hello", 5, None).await;
         assert!(!id.is_empty());
     }
 }

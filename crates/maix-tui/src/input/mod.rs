@@ -1,37 +1,8 @@
 //! Input handling for TUI.
 
-/// Command with description for completion display.
-struct CommandDef {
-    name: &'static str,
-    description: &'static str,
-    /// Parameter hints for the command
-    params: &'static [&'static str],
-}
+mod commands;
 
-/// Code snippet for completion.
-struct CodeSnippet {
-    trigger: &'static str,
-    description: &'static str,
-    content: &'static str,
-}
-
-const CODE_SNIPPETS: &[CodeSnippet] = &[
-    CodeSnippet { trigger: "fn", description: "函数定义", content: "fn name() {\n    \n}" },
-    CodeSnippet { trigger: "if", description: "条件语句", content: "if condition {\n    \n}" },
-    CodeSnippet { trigger: "for", description: "循环", content: "for item in collection {\n    \n}" },
-    CodeSnippet { trigger: "match", description: "模式匹配", content: "match value {\n    Pattern => {},\n    _ => {},\n}" },
-    CodeSnippet { trigger: "struct", description: "结构体", content: "struct Name {\n    field: Type,\n}" },
-    CodeSnippet { trigger: "enum", description: "枚举", content: "enum Name {\n    Variant1,\n    Variant2,\n}" },
-    CodeSnippet { trigger: "impl", description: "实现块", content: "impl Name {\n    pub fn new() -> Self {\n        Self {}\n    }\n}" },
-    CodeSnippet { trigger: "trait", description: "特征", content: "trait Name {\n    fn method(&self);\n}" },
-    CodeSnippet { trigger: "async", description: "异步函数", content: "async fn name() -> Result<(), Error> {\n    Ok(())\n}" },
-    CodeSnippet { trigger: "test", description: "测试函数", content: "#[test]\nfn test_name() {\n    assert!(true);\n}" },
-    CodeSnippet { trigger: "print", description: "打印宏", content: "println!(\"{}\", value);" },
-    CodeSnippet { trigger: "vec", description: "向量", content: "vec![]" },
-    CodeSnippet { trigger: "hashmap", description: "哈希映射", content: "HashMap::new()" },
-    CodeSnippet { trigger: "result", description: "结果类型", content: "Result<T, E>" },
-    CodeSnippet { trigger: "option", description: "选项类型", content: "Option<T>" },
-];
+use commands::{CODE_SNIPPETS, SLASH_COMMANDS};
 
 /// File path completion support.
 pub struct FilePathCompleter {
@@ -110,91 +81,6 @@ impl FilePathCompleter {
     }
 }
 
-const SLASH_COMMANDS: &[CommandDef] = &[
-    CommandDef { name: "/help", description: "显示帮助信息", params: &[] },
-    CommandDef { name: "/quit", description: "退出程序", params: &[] },
-    CommandDef { name: "/exit", description: "退出程序", params: &[] },
-    CommandDef { name: "/mode", description: "切换模式", params: &["plan", "agent", "yolo"] },
-    CommandDef { name: "/compact", description: "压缩上下文", params: &["<instructions>"] },
-    CommandDef { name: "/memory", description: "显示记忆面板", params: &[] },
-    CommandDef { name: "/tools", description: "显示工具面板", params: &[] },
-    CommandDef { name: "/stats", description: "显示统计面板", params: &[] },
-    CommandDef { name: "/sessions", description: "列出已保存会话", params: &[] },
-    CommandDef { name: "/resume", description: "恢复已保存会话", params: &["<session-id>"] },
-    CommandDef { name: "/cost", description: "显示费用明细", params: &[] },
-    CommandDef { name: "/config", description: "查看/修改配置", params: &["export", "import", "history", "sync", "rollback"] },
-    CommandDef { name: "/config export", description: "导出配置", params: &[] },
-    CommandDef { name: "/config import", description: "导入配置", params: &["<file>"] },
-    CommandDef { name: "/config history", description: "配置历史", params: &[] },
-    CommandDef { name: "/config sync", description: "同步配置", params: &[] },
-    CommandDef { name: "/config rollback", description: "回滚配置", params: &["<version>"] },
-    CommandDef { name: "/doctor", description: "环境诊断", params: &[] },
-    CommandDef { name: "/clear", description: "清空对话", params: &[] },
-    CommandDef { name: "/vim", description: "切换 Vim 模式", params: &[] },
-    CommandDef { name: "/init", description: "生成 MAIX.md", params: &["force"] },
-    CommandDef { name: "/model", description: "切换模型", params: &["<model-name>"] },
-    CommandDef { name: "/identity", description: "身份管理", params: &[] },
-    CommandDef { name: "/architecture", description: "架构管理", params: &[] },
-    CommandDef { name: "/skill", description: "技能管理", params: &[] },
-    CommandDef { name: "/task", description: "任务队列管理", params: &[] },
-    CommandDef { name: "/health", description: "健康检查", params: &[] },
-    CommandDef { name: "/export", description: "导出对话为 Markdown", params: &["<filename>"] },
-    CommandDef { name: "/desk", description: "显示工作台面板", params: &[] },
-    CommandDef { name: "/note add", description: "添加便签", params: &["<content>"] },
-    CommandDef { name: "/pin", description: "固定文件到工作台", params: &["<file>"] },
-    CommandDef { name: "/task_add", description: "添加任务到工作台", params: &["<title>"] },
-    CommandDef { name: "/timestamp", description: "开关时间戳", params: &[] },
-    CommandDef { name: "/fullscreen", description: "开关全屏模式", params: &[] },
-    CommandDef { name: "/sound", description: "开关声音提醒", params: &[] },
-    CommandDef { name: "/remind", description: "设置定时提醒", params: &["<time>", "<message>"] },
-    CommandDef { name: "/reminders", description: "查看提醒列表", params: &[] },
-    CommandDef { name: "/todo", description: "待办事项管理", params: &["add", "done", "start", "rm", "list"] },
-    CommandDef { name: "/todo add", description: "添加待办", params: &["<content>"] },
-    CommandDef { name: "/todo done", description: "完成待办", params: &["<id>"] },
-    CommandDef { name: "/todo start", description: "开始待办", params: &["<id>"] },
-    CommandDef { name: "/todo rm", description: "删除待办", params: &["<id>"] },
-    CommandDef { name: "/todo list", description: "列出待办", params: &[] },
-    CommandDef { name: "/theme", description: "切换主题", params: &["dark", "light", "solarized", "dracula"] },
-    CommandDef { name: "/layout", description: "切换布局", params: &["standard", "compact", "relaxed", "focus"] },
-    CommandDef { name: "/keys", description: "快捷键方案", params: &["standard", "vim", "emacs"] },
-    CommandDef { name: "/tutorial", description: "交互式教程", params: &[] },
-    CommandDef { name: "/quickstart", description: "快速入门卡片", params: &[] },
-    CommandDef { name: "/tips", description: "最佳实践提示", params: &[] },
-    CommandDef { name: "/usage", description: "使用统计", params: &[] },
-    CommandDef { name: "/feedback", description: "提交反馈", params: &["<content>"] },
-    CommandDef { name: "/profile", description: "用户配置管理", params: &["save", "load"] },
-    CommandDef { name: "/calendar", description: "显示日历", params: &[] },
-    CommandDef { name: "/habit", description: "习惯追踪", params: &["add", "done", "rm", "list"] },
-    CommandDef { name: "/habit add", description: "添加习惯", params: &["<name>"] },
-    CommandDef { name: "/habit done", description: "完成习惯", params: &["<id>"] },
-    CommandDef { name: "/habit rm", description: "删除习惯", params: &["<id>"] },
-    CommandDef { name: "/habit list", description: "列出习惯", params: &[] },
-    CommandDef { name: "/profile", description: "用户配置管理", params: &["save", "load"] },
-    CommandDef { name: "/profile save", description: "保存配置", params: &["<name>"] },
-    CommandDef { name: "/profile load", description: "加载配置", params: &["<name>"] },
-    CommandDef { name: "/tag", description: "会话标签管理", params: &["add", "rm"] },
-    CommandDef { name: "/tag add", description: "添加标签", params: &["<name>"] },
-    CommandDef { name: "/tag rm", description: "删除标签", params: &["<name>"] },
-    CommandDef { name: "/tool_perms", description: "工具权限管理", params: &["add", "rm", "list"] },
-    CommandDef { name: "/tool_perms add", description: "添加权限", params: &["<tool>", "auto|manual", "risk_level"] },
-    CommandDef { name: "/tool_perms rm", description: "删除权限", params: &["<tool>"] },
-    CommandDef { name: "/tool_perms list", description: "列出权限", params: &[] },
-    CommandDef { name: "/session merge", description: "合并会话", params: &["<session-id>"] },
-    CommandDef { name: "/session compare", description: "比较会话", params: &["<session-id>"] },
-    CommandDef { name: "/session replay", description: "回放会话", params: &[] },
-    CommandDef { name: "/session share", description: "分享会话", params: &[] },
-    CommandDef { name: "/export html", description: "导出为 HTML", params: &[] },
-    CommandDef { name: "/tool_chain", description: "工具链管理", params: &["add", "run", "rm", "list"] },
-    CommandDef { name: "/tool_chain add", description: "创建工具链", params: &["<name>", "<tool1>", "<tool2>"] },
-    CommandDef { name: "/tool_chain run", description: "执行工具链", params: &["<name>"] },
-    CommandDef { name: "/tool_chain rm", description: "删除工具链", params: &["<name>"] },
-    CommandDef { name: "/tool_template", description: "工具模板管理", params: &["save", "load", "rm", "list"] },
-    CommandDef { name: "/tool_template save", description: "保存工具模板", params: &["<name>", "<tool1>", "<tool2>"] },
-    CommandDef { name: "/tool_template load", description: "加载工具模板", params: &["<name>"] },
-    CommandDef { name: "/tool_template rm", description: "删除工具模板", params: &["<name>"] },
-    CommandDef { name: "/tool_parallel", description: "并行执行工具", params: &["<tool1>", "<tool2>"] },
-];
-
 /// Completion item with name and description.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -216,6 +102,7 @@ pub struct InputState {
     pub completion_offset: usize,  // Scroll offset for completions
     pub custom_commands: Vec<String>,
     /// Original input before tab completion started
+    #[allow(dead_code)]
     pub completion_original: Option<String>,
     /// File path completer
     pub file_completer: FilePathCompleter,
@@ -227,6 +114,7 @@ pub struct InputState {
     pub file_identifiers: Vec<String>,
 }
 
+#[allow(dead_code)]
 impl InputState {
     pub fn new() -> Self {
         Self {
@@ -247,6 +135,7 @@ impl InputState {
     }
 
     /// Tab completion: cycle through matching commands.
+    #[allow(dead_code)]
     pub fn tab_complete(&mut self, visible_height: usize) {
         // If we already have completions and buffer hasn't changed, cycle
         if !self.completions.is_empty() && self.buffer.starts_with('/') {
@@ -295,12 +184,12 @@ impl InputState {
             .unwrap_or(0);
         let prefix = &input[start..];
         // Remove the @ or ./ or ../ prefix
-        if prefix.starts_with('@') {
-            prefix[1..].to_string()
-        } else if prefix.starts_with("../") {
-            prefix[3..].to_string()
-        } else if prefix.starts_with("./") {
-            prefix[2..].to_string()
+        if let Some(stripped) = prefix.strip_prefix('@') {
+            stripped.to_string()
+        } else if let Some(stripped) = prefix.strip_prefix("../") {
+            stripped.to_string()
+        } else if let Some(stripped) = prefix.strip_prefix("./") {
+            stripped.to_string()
         } else {
             prefix.to_string()
         }
@@ -457,6 +346,7 @@ impl InputState {
     }
 
     /// Record completion selection for learning.
+    #[allow(dead_code)]
     pub fn record_completion_selection(&mut self, name: &str) {
         *self.completion_usage.entry(name.to_string()).or_insert(0) += 1;
     }
@@ -478,7 +368,7 @@ impl InputState {
                     let clean = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
                     if clean.len() > 2
                         && clean.chars().all(|c| c.is_alphanumeric() || c == '_')
-                        && !clean.chars().next().map_or(false, |c| c.is_ascii_digit())
+                        && !clean.chars().next().is_some_and(|c| c.is_ascii_digit())
                         && !is_common_word(clean)
                     {
                         identifiers.push(clean.to_string());
@@ -506,8 +396,7 @@ impl InputState {
             // Record selection for learning
             self.record_completion_selection(&name);
             // For code snippet completion, insert the snippet content
-            if name.starts_with(':') {
-                let trigger = &name[1..];
+            if let Some(trigger) = name.strip_prefix(':') {
                 if let Some(snippet) = CODE_SNIPPETS.iter().find(|s| s.trigger == trigger) {
                     self.buffer = snippet.content.to_string();
                     self.cursor = self.buffer.len();
@@ -518,8 +407,7 @@ impl InputState {
             }
 
             // For variable name completion, insert the variable name without the $ prefix
-            if name.starts_with('$') {
-                let var_name = &name[1..];
+            if let Some(var_name) = name.strip_prefix('$') {
                 self.buffer = var_name.to_string();
                 self.cursor = self.buffer.len();
                 self.completions.clear();
@@ -528,8 +416,7 @@ impl InputState {
             }
 
             // For file identifier completion, insert the identifier without the # prefix
-            if name.starts_with('#') {
-                let id_name = &name[1..];
+            if let Some(id_name) = name.strip_prefix('#') {
                 self.buffer = id_name.to_string();
                 self.cursor = self.buffer.len();
                 self.completions.clear();
@@ -591,7 +478,6 @@ impl InputState {
     #[allow(dead_code)]
     pub fn extract_variable_names(&mut self, text: &str) {
         // Simple heuristic: look for identifiers that look like variable names
-        // This is a simplified version - in practice, you'd use a proper parser
         let mut new_vars = Vec::new();
 
         // Look for patterns like: let/const/var name = ..., name: Type, etc.
@@ -663,6 +549,9 @@ impl InputState {
             _ => None,
         };
 
+        // Defensive cursor bounds check
+        self.cursor = self.cursor.min(self.buffer.len());
+
         if let Some(closing) = pair {
             self.buffer.insert(self.cursor, c);
             self.buffer.insert(self.cursor + c.len_utf8(), closing);
@@ -670,6 +559,7 @@ impl InputState {
         } else {
             // Skip closing char if it's already there (type-over)
             if (c == ')' || c == ']' || c == '}' || c == '"' || c == '\'' || c == '`')
+                && self.cursor < self.buffer.len()
                 && self.buffer[self.cursor..].starts_with(c)
             {
                 self.cursor += c.len_utf8();
@@ -747,7 +637,7 @@ impl InputState {
         }
         // Find word start
         pos = self.buffer[..pos]
-            .rfind(|c: char| c == ' ' || c == '/' || c == '\\' || c == '\n')
+            .rfind([' ', '/', '\\', '\n'])
             .map(|p| p + 1)
             .unwrap_or(0);
         self.cursor = pos;
@@ -796,7 +686,7 @@ impl InputState {
         }
         // Find start of word
         let start = self.buffer[..end]
-            .rfind(|c: char| c == ' ' || c == '/' || c == '\n')
+            .rfind([' ', '/', '\n'])
             .map(|p| p + 1)
             .unwrap_or(0);
         self.buffer.drain(start..self.cursor);

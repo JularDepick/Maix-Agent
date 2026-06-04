@@ -1,5 +1,30 @@
+//! # Maix-Server
+//!
+//! gRPC server for Maix-Agent — handles client connections, session management,
+//! and orchestrates agent interactions.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+//! │   CLI/TUI   │────▶│  gRPC Server │────▶│  Agent Core │
+//! └─────────────┘     └─────────────┘     └─────────────┘
+//!                           │
+//!                     ┌─────┴─────┐
+//!                     ▼           ▼
+//!               Session Mgr  Transport
+//! ```
+//!
+//! ## Modules
+//!
+//! - [`server`] — Core service implementation
+//! - [`session_manager`] — Session lifecycle management
+//! - [`chat_stream`] — Streaming chat response handling
+//! - [`transport`] — Transport layer (TCP, Unix socket, Named Pipe)
+//! - [`daemon`] — Daemonization and service management
+//! - [`shutdown`] — Graceful shutdown handling
+
 mod chat_stream;
-mod client_launcher;
 mod collaboration;
 mod daemon;
 mod server;

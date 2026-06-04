@@ -53,7 +53,7 @@ impl MultiEditTool {
         for (i, _) in content_lower.match_indices(&*search_lower) {
             result.push_str(&content[last..i]);
             result.push_str(replace);
-            last = i + search.len();
+            last = i + content[i..].to_lowercase().find(&*search_lower).map(|j| j + search_lower.len()).unwrap_or(search.len());
         }
         result.push_str(&content[last..]);
         result

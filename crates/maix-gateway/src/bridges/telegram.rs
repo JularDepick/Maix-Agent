@@ -126,16 +126,33 @@ impl PlatformBridge for TelegramBridge {
             MessageFormat::Plain => "",
         };
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "chat_id": msg.chat_id,
             "text": msg.text,
-            "parse_mode": parse_mode,
-            "reply_to_message_id": msg.reply_to,
         });
+        if !parse_mode.is_empty() {
+            body["parse_mode"] = serde_json::json!(parse_mode);
+        }
+        if let Some(ref reply_to) = msg.reply_to {
+            body["reply_to_message_id"] = serde_json::json!(reply_to);
+        }
 
-        // In a real implementation, use reqwest to POST
         tracing::info!("Telegram send to {}: {} chars", msg.chat_id, msg.text.len());
-        let _ = (url, body);
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Telegram HTTP error: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("Telegram API error {}: {}", status, text));
+        }
+
         Ok(())
     }
 }
@@ -206,5 +223,128 @@ mod tests {
     fn test_telegram_platform() {
         let bridge = TelegramBridge::new("test-token");
         assert_eq!(bridge.platform(), "telegram");
+    }
+
+    #[test]
+    fn test_telegram_with_api_base() {
+        let bridge = TelegramBridge::new("token").with_api_base("https://custom.api");
+        assert_eq!(bridge.api_base, "https://custom.api");
+    }
+
+    #[test]
+    fn test_telegram_verify_signature_always_true() {
+        let bridge = TelegramBridge::new("token");
+        assert!(bridge.verify_signature(&[], b"body"));
+    }
+
+    #[test]
+    fn test_telegram_parse_edited_message() {
+        let bridge = TelegramBridge::new("test-token");
+        let body = r#"{
+            "edited_message": {
+                "message_id": 42,
+                "from": {"id": 100},
+                "chat": {"id": 200},
+                "date": 1700000000,
+                "text": "edited text"
+            }
+        }"#;
+        let msg = bridge.parse_webhook(body).unwrap();
+        assert_eq!(msg.text, "edited text");
+        assert_eq!(msg.message_id, "42");
+    }
+
+    #[test]
+    fn test_telegram_parse_document() {
+        let bridge = TelegramBridge::new("test-token");
+        let body = r#"{
+            "message": {
+                "message_id": 1,
+                "from": {"id": 100},
+                "chat": {"id": 200},
+                "date": 1700000000,
+                "text": "",
+                "document": {"file_id": "doc123", "file_name": "report.pdf"}
+            }
+        }"#;
+        let msg = bridge.parse_webhook(body).unwrap();
+        assert_eq!(msg.attachments.len(), 1);
+        assert_eq!(msg.attachments[0].attachment_type, "document");
+        assert_eq!(msg.attachments[0].filename.as_deref(), Some("report.pdf"));
+    }
+
+    #[test]
+    fn test_telegram_format_html() {
+        let bridge = TelegramBridge::new("test-token");
+        let msg = OutgoingMessage {
+            chat_id: "123".into(),
+            text: "bold".into(),
+            reply_to: None,
+            format: MessageFormat::Html,
+        };
+        assert_eq!(bridge.format_response(&msg), "bold");
+    }
+
+    #[test]
+    fn test_telegram_format_plain() {
+        let bridge = TelegramBridge::new("test-token");
+        let msg = OutgoingMessage {
+            chat_id: "123".into(),
+            text: "plain text".into(),
+            reply_to: None,
+            format: MessageFormat::Plain,
+        };
+        assert_eq!(bridge.format_response(&msg), "plain text");
+    }
+
+    #[test]
+    fn test_telegram_parse_invalid_json() {
+        let bridge = TelegramBridge::new("test-token");
+        assert!(bridge.parse_webhook("not json at all").is_err());
+    }
+
+    #[test]
+    fn test_telegram_parse_missing_from() {
+        let bridge = TelegramBridge::new("test-token");
+        let body = r#"{"message":{"message_id":1,"chat":{"id":20},"date":1700000000,"text":"hi"}}"#;
+        let msg = bridge.parse_webhook(body).unwrap();
+        assert_eq!(msg.user_id, ""); // defaults to empty
+        assert_eq!(msg.text, "hi");
+    }
+
+    #[test]
+    fn test_telegram_parse_missing_text() {
+        let bridge = TelegramBridge::new("test-token");
+        let body = r#"{"message":{"message_id":1,"from":{"id":10},"chat":{"id":20},"date":1700000000}}"#;
+        let msg = bridge.parse_webhook(body).unwrap();
+        assert_eq!(msg.text, ""); // defaults to empty
+    }
+
+    #[test]
+    fn test_telegram_parse_empty_photo() {
+        let bridge = TelegramBridge::new("test-token");
+        let body = r#"{"message":{"message_id":1,"from":{"id":10},"chat":{"id":20},"date":1700000000,"text":"","photo":[]}}"#;
+        let msg = bridge.parse_webhook(body).unwrap();
+        assert!(msg.attachments.is_empty());
+    }
+
+    #[test]
+    fn test_telegram_parse_document_no_filename() {
+        let bridge = TelegramBridge::new("test-token");
+        let body = r#"{"message":{"message_id":1,"from":{"id":10},"chat":{"id":20},"date":1700000000,"text":"","document":{"file_id":"doc1"}}}"#;
+        let msg = bridge.parse_webhook(body).unwrap();
+        assert_eq!(msg.attachments.len(), 1);
+        assert!(msg.attachments[0].filename.is_none());
+    }
+
+    #[test]
+    fn test_telegram_photo_url_format() {
+        let bridge = TelegramBridge::new("bot-token").with_api_base("https://api.telegram.org");
+        let body = r#"{"message":{"message_id":1,"from":{"id":10},"chat":{"id":20},"date":1700000000,"text":"","photo":[{"file_id":"photo123","width":90,"height":90}]}}"#;
+        let msg = bridge.parse_webhook(body).unwrap();
+        assert_eq!(msg.attachments.len(), 1);
+        let url = msg.attachments[0].url.as_deref().unwrap();
+        assert!(url.contains("photo123"));
+        assert!(url.contains("bot-token"));
     }
 }

@@ -1,19 +1,23 @@
-#![allow(dead_code)]
 //! Split pane management — horizontal/vertical splits with focus switching.
 
 /// Content type for a pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaneContent {
     Chat,
+    #[allow(dead_code)]
     Code { file_path: String },
+    #[allow(dead_code)]
     FileTree,
+    #[allow(dead_code)]
     Preview { title: String },
+    #[allow(dead_code)]
     Terminal,
 }
 
 /// Split direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitDirection {
+    #[allow(dead_code)]
     Horizontal,
     Vertical,
 }
@@ -21,9 +25,13 @@ pub enum SplitDirection {
 /// A single pane with content and area.
 #[derive(Debug, Clone)]
 pub struct Pane {
+    #[allow(dead_code)]
     pub content: PaneContent,
+    #[allow(dead_code)]
     pub width: u16,
+    #[allow(dead_code)]
     pub height: u16,
+    #[allow(dead_code)]
     pub focused: bool,
 }
 
@@ -40,12 +48,17 @@ impl Pane {
 
 /// Pane layout manager.
 pub struct PaneLayout {
+    #[allow(dead_code)]
     pub panes: Vec<Pane>,
+    #[allow(dead_code)]
     pub split: SplitDirection,
+    #[allow(dead_code)]
     pub focus_index: usize,
+    #[allow(dead_code)]
     pub split_ratio: f32,
 }
 
+#[allow(dead_code)]
 impl PaneLayout {
     pub fn single(content: PaneContent) -> Self {
         Self {

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Desktop notification system for task completion and errors.
 
 /// Notification configuration.
@@ -8,6 +7,7 @@ pub struct NotificationConfig {
     pub on_task_complete: bool,
     pub on_error: bool,
     pub sound: bool,
+    #[allow(dead_code)]
     pub timeout_ms: u32,
 }
 
@@ -26,8 +26,10 @@ impl Default for NotificationConfig {
 /// Notification severity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotifyKind {
+    #[allow(dead_code)]
     Info,
     Success,
+    #[allow(dead_code)]
     Warning,
     Error,
 }
@@ -40,12 +42,17 @@ pub struct Notifier {
 
 #[derive(Debug, Clone)]
 pub struct NotificationRecord {
+    #[allow(dead_code)]
     pub title: String,
+    #[allow(dead_code)]
     pub body: String,
+    #[allow(dead_code)]
     pub kind: NotifyKind,
+    #[allow(dead_code)]
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
+#[allow(dead_code)]
 impl Notifier {
     pub fn new(config: NotificationConfig) -> Self {
         Self {
@@ -72,41 +79,33 @@ impl Notifier {
 
     #[cfg(target_os = "windows")]
     fn send_platform_notification(&self, title: &str, body: &str, _kind: NotifyKind) {
-        // Use PowerShell to send Windows toast notification
-        let script = format!(
-            r#"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+        // Pass values via environment variables to avoid PowerShell injection
+        let script = r#"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-$template = @"
-<toast>
-    <visual>
-        <binding template="ToastGeneric">
-            <text>{}</text>
-            <text>{}</text>
-        </binding>
-    </visual>
-</toast>
-"@
+$t = $env:MAIX_NOTIFY_TITLE -replace '&','&amp;' -replace '<','&lt;' -replace '>','&gt;' -replace '"','&quot;'
+$b = $env:MAIX_NOTIFY_BODY -replace '&','&amp;' -replace '<','&lt;' -replace '>','&gt;' -replace '"','&quot;' -replace "`n",'&#10;'
+$template = "<toast><visual><binding template=`"ToastGeneric`"><text>$t</text><text>$b</text></binding></visual></toast>"
 $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
 $xml.LoadXml($template)
 $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Maix-Agent").Show($toast)"#,
-            title.replace('"', "&quot;"),
-            body.replace('"', "&quot;").replace('\n', "&#10;")
-        );
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Maix-Agent").Show($toast)"#;
         let _ = std::process::Command::new("powershell")
-            .args(["-Command", &script])
+            .args(["-Command", script])
+            .env("MAIX_NOTIFY_TITLE", title)
+            .env("MAIX_NOTIFY_BODY", body)
             .output();
     }
 
     #[cfg(target_os = "macos")]
     fn send_platform_notification(&self, title: &str, body: &str, _kind: NotifyKind) {
-        let script = format!(
-            r#"display notification "{}" with title "{}""#,
-            body.replace('"', "\\\""),
-            title.replace('"', "\\\"")
-        );
+        // Pass values via environment variables to avoid shell injection
         let _ = std::process::Command::new("osascript")
-            .args(["-e", &script])
+            .args([
+                "-e",
+                "display notification (system attribute \"MAIX_NOTIFY_BODY\") with title (system attribute \"MAIX_NOTIFY_TITLE\")",
+            ])
+            .env("MAIX_NOTIFY_TITLE", title)
+            .env("MAIX_NOTIFY_BODY", body)
             .output();
     }
 
@@ -194,6 +193,7 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
     }
 }
 
+#[allow(dead_code)]
 fn kind_str(kind: NotifyKind) -> &'static str {
     match kind {
         NotifyKind::Info => "INFO",

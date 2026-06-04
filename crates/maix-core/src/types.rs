@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Role in a chat conversation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     System,
@@ -303,4 +303,133 @@ pub enum AgentState {
     UpdatingMemory,
     Errored,
     Paused,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_content_text() {
+        let content = MessageContent::Text("hello".into());
+        assert_eq!(content.text(), Some("hello"));
+    }
+
+    #[test]
+    fn test_message_content_parts() {
+        let content = MessageContent::Parts(vec![ContentPart::Text { text: "hi".into() }]);
+        assert_eq!(content.text(), None);
+    }
+
+    #[test]
+    fn test_token_usage_merge() {
+        let mut a = TokenUsage { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150, cache_read_tokens: 10, cache_write_tokens: 5 };
+        let b = TokenUsage { prompt_tokens: 200, completion_tokens: 80, total_tokens: 280, cache_read_tokens: 20, cache_write_tokens: 10 };
+        a.merge(&b);
+        assert_eq!(a.prompt_tokens, 300);
+        assert_eq!(a.completion_tokens, 130);
+        assert_eq!(a.total_tokens, 430);
+        assert_eq!(a.cache_read_tokens, 30);
+        assert_eq!(a.cache_write_tokens, 15);
+    }
+
+    #[test]
+    fn test_token_usage_output_tokens() {
+        let u = TokenUsage { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150, cache_read_tokens: 0, cache_write_tokens: 0 };
+        assert_eq!(u.output_tokens(), 50);
+    }
+
+    #[test]
+    fn test_token_usage_cache_hit_rate() {
+        let u = TokenUsage { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150, cache_read_tokens: 30, cache_write_tokens: 0 };
+        let rate = u.cache_hit_rate();
+        assert!((rate - 30.0).abs() < 0.01);
+
+        let zero = TokenUsage::default();
+        assert_eq!(zero.cache_hit_rate(), 0.0);
+    }
+
+    #[test]
+    fn test_token_usage_cost() {
+        let pricing = Pricing::default();
+        let u = TokenUsage { prompt_tokens: 1_000_000, completion_tokens: 500_000, total_tokens: 1_500_000, cache_read_tokens: 0, cache_write_tokens: 0 };
+        let cost = u.cost(&pricing);
+        // input: 1M * 0.5/1M = 0.5, output: 500K * 2.0/1M = 1.0
+        assert!((cost - 1.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_token_usage_cost_with_cache() {
+        let pricing = Pricing::default();
+        let u = TokenUsage { prompt_tokens: 1_000_000, completion_tokens: 0, total_tokens: 1_000_000, cache_read_tokens: 500_000, cache_write_tokens: 0 };
+        let cost = u.cost(&pricing);
+        // non-cached input: 500K * 0.5/1M = 0.25, cache read: 500K * 0.05/1M = 0.025
+        assert!((cost - 0.275).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_cache_savings() {
+        let pricing = Pricing::default();
+        let u = TokenUsage { prompt_tokens: 1_000_000, completion_tokens: 0, total_tokens: 1_000_000, cache_read_tokens: 500_000, cache_write_tokens: 0 };
+        let savings = u.cache_savings(&pricing);
+        // 500K * (0.5 - 0.05) / 1M = 0.225
+        assert!((savings - 0.225).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_cost_tracker_record_and_total() {
+        let mut tracker = CostTracker::new(Pricing::default());
+        let usage = TokenUsage { prompt_tokens: 1000, completion_tokens: 500, total_tokens: 1500, cache_read_tokens: 0, cache_write_tokens: 0 };
+        tracker.record_turn(1, usage.clone(), "test".into());
+        tracker.record_turn(2, usage, "test".into());
+        assert!(tracker.total_cost() > 0.0);
+        assert_eq!(tracker.total_usage().prompt_tokens, 2000);
+        assert_eq!(tracker.turns.len(), 2);
+    }
+
+    #[test]
+    fn test_cost_tracker_budget() {
+        let mut tracker = CostTracker::new(Pricing::default());
+        tracker.set_budget(1.0);
+        let (exceeded, _) = tracker.budget_status();
+        assert!(!exceeded);
+
+        // Add a large usage
+        let usage = TokenUsage { prompt_tokens: 10_000_000, completion_tokens: 10_000_000, total_tokens: 20_000_000, cache_read_tokens: 0, cache_write_tokens: 0 };
+        tracker.record_turn(1, usage, "test".into());
+        let (exceeded, remaining) = tracker.budget_status();
+        assert!(exceeded);
+        assert!(remaining < 0.0);
+    }
+
+    #[test]
+    fn test_cost_tracker_would_exceed() {
+        let mut tracker = CostTracker::new(Pricing::default());
+        tracker.set_budget(1.0);
+        assert!(!tracker.would_exceed_budget(0.5));
+        assert!(tracker.would_exceed_budget(2.0));
+    }
+
+    #[test]
+    fn test_cost_tracker_no_budget() {
+        let tracker = CostTracker::new(Pricing::default());
+        let (exceeded, remaining) = tracker.budget_status();
+        assert!(!exceeded);
+        assert_eq!(remaining, f64::INFINITY);
+        assert!(!tracker.would_exceed_budget(999.0));
+        assert_eq!(tracker.budget_usage_pct(), 0.0);
+    }
+
+    #[test]
+    fn test_pricing_presets() {
+        let anthropic = Pricing::anthropic();
+        assert!(anthropic.input_per_million > 0.0);
+        assert!(anthropic.output_per_million > anthropic.input_per_million);
+
+        let openai = Pricing::openai_gpt4o();
+        assert!(openai.input_per_million > 0.0);
+
+        let default = Pricing::default();
+        assert!(default.input_per_million > 0.0);
+    }
 }

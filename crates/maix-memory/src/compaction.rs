@@ -23,7 +23,9 @@ pub async fn compact_session(
 
     let mut removed = 0;
     for entry in entries.iter().skip(max_entries) {
-        let _ = store.forget(&entry.id).await;
+        if let Err(e) = store.forget(&entry.id).await {
+            tracing::warn!("compaction: failed to forget entry {}: {}", entry.id, e);
+        }
         removed += 1;
     }
     Ok(removed)
@@ -106,13 +108,17 @@ pub async fn summarize_old_entries(
             created_at: Utc::now(),
             metadata: HashMap::new(),
         };
-        let _ = store.save(summary_entry).await;
+        if let Err(e) = store.save(summary_entry).await {
+            tracing::warn!("compaction: failed to save summary: {}", e);
+        }
     }
 
     // Delete old entries
     let count = old_entries.len();
     for entry in old_entries {
-        let _ = store.forget(&entry.id).await;
+        if let Err(e) = store.forget(&entry.id).await {
+            tracing::warn!("compaction: failed to delete old entry {}: {}", entry.id, e);
+        }
     }
 
     Ok(count)
@@ -121,7 +127,5 @@ pub async fn summarize_old_entries(
 #[cfg(test)]
 mod tests {
     #[test]
-    fn test_compaction_smoke() {
-        assert!(true);
-    }
+    fn test_compaction_smoke() {}
 }

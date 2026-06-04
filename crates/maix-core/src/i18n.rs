@@ -134,19 +134,19 @@ static I18N: RwLock<Option<I18n>> = RwLock::new(None);
 
 /// Initialize the global i18n instance.
 pub fn init_i18n(locale: Locale) {
-    let mut i18n = I18N.write().unwrap();
+    let mut i18n = I18N.write().unwrap_or_else(|e| e.into_inner());
     *i18n = Some(I18n::new(locale));
 }
 
 /// Get the current locale.
 pub fn current_locale() -> Locale {
-    let i18n = I18N.read().unwrap();
+    let i18n = I18N.read().unwrap_or_else(|e| e.into_inner());
     i18n.as_ref().map(|i| i.locale()).unwrap_or_default()
 }
 
 /// Set the current locale.
 pub fn set_locale(locale: Locale) {
-    let mut i18n = I18N.write().unwrap();
+    let mut i18n = I18N.write().unwrap_or_else(|e| e.into_inner());
     if let Some(ref mut i) = *i18n {
         i.set_locale(locale);
     }
@@ -154,13 +154,13 @@ pub fn set_locale(locale: Locale) {
 
 /// Translate a key using the global i18n instance.
 pub fn t(key: &str) -> String {
-    let i18n = I18N.read().unwrap();
+    let i18n = I18N.read().unwrap_or_else(|e| e.into_inner());
     i18n.as_ref().map(|i| i.t(key)).unwrap_or_else(|| key.to_string())
 }
 
 /// Translate with named arguments using the global i18n instance.
 pub fn t_fmt(key: &str, args: &[(&str, &str)]) -> String {
-    let i18n = I18N.read().unwrap();
+    let i18n = I18N.read().unwrap_or_else(|e| e.into_inner());
     i18n.as_ref().map(|i| i.t_fmt(key, args)).unwrap_or_else(|| key.to_string())
 }
 

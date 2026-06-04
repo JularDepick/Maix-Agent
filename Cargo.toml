@@ -48,8 +48,14 @@ crossterm = { version = "0.28", features = ["event-stream"] }
 
 # gRPC
 tonic = { version = "0.12", features = ["transport"] }
+tonic-build = "0.12"
+prost = "0.13"
+prost-types = "0.13"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
+
+# Misc
+uuid = { version = "1", features = ["v4"] }
 
 # HTTP Server
 axum = { version = "0.8", features = ["ws"] }
@@ -59,7 +65,7 @@ async-stream = "0.3"
 # Misc
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
-futures-core = "0.3"
+zip = "2"
 
 # Local crates
 maix-core = { path = "crates/maix-core" }

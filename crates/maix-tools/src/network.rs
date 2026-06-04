@@ -45,7 +45,8 @@ impl Tool for WebFetchTool {
                 "type": "object",
                 "properties": {
                     "url": { "type": "string", "description": "URL to fetch" },
-                    "prompt": { "type": "string", "description": "Optional prompt to process the fetched content (e.g., \"summarize this page\", \"extract all API endpoints\")" }
+                    "prompt": { "type": "string", "description": "Optional prompt to process the fetched content (e.g., \"summarize this page\", \"extract all API endpoints\")" },
+                    "timeout": { "type": "integer", "description": "Timeout in seconds (default: 30, max: 120)" }
                 },
                 "required": ["url"]
             }),
@@ -58,12 +59,19 @@ impl Tool for WebFetchTool {
         if url.is_empty() {
             return Err(maix_core::MaixError::Tool("web_fetch: url is required".into()));
         }
+        if url.len() > 4096 {
+            return Err(maix_core::MaixError::Tool("web_fetch: url too long (max 4KB)".into()));
+        }
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err(maix_core::MaixError::Tool("web_fetch: url must start with http:// or https://".into()));
+        }
 
         let prompt = args["prompt"].as_str();
+        let timeout_secs = args["timeout"].as_u64().unwrap_or(30).min(120);
 
         let resp = self.client
             .get(url)
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(timeout_secs))
             .send()
             .await
             .map_err(|e| maix_core::MaixError::Tool(format!("web_fetch: {e}")))?;
@@ -157,10 +165,8 @@ fn html_to_markdown(html: &str) -> String {
                 }
                 else if tag.starts_with("p") || tag.starts_with("div") || tag.starts_with("section")
                     || tag.starts_with("article") || tag.starts_with("header") || tag.starts_with("footer")
-                    || tag.starts_with("main") {
-                    result.push_str("\n\n");
-                }
-                else if tag.starts_with("/p") || tag.starts_with("/div") || tag.starts_with("/section")
+                    || tag.starts_with("main")
+                    || tag.starts_with("/p") || tag.starts_with("/div") || tag.starts_with("/section")
                     || tag.starts_with("/article") || tag.starts_with("/header") || tag.starts_with("/footer")
                     || tag.starts_with("/main") {
                     result.push_str("\n\n");
@@ -174,10 +180,8 @@ fn html_to_markdown(html: &str) -> String {
                 else if tag.starts_with("li") { result.push_str("\n- "); }
                 else if tag.starts_with("tr") { result.push('\n'); }
                 else if tag.starts_with("td") || tag.starts_with("th") { result.push_str(" | "); }
-                else if tag.starts_with("code") { result.push('`'); }
-                else if tag.starts_with("/code") { result.push('`'); }
-                else if tag.starts_with("pre") { result.push_str("\n```\n"); }
-                else if tag.starts_with("/pre") { result.push_str("\n```\n"); }
+                else if tag.starts_with("code") || tag.starts_with("/code") { result.push('`'); }
+                else if tag.starts_with("pre") || tag.starts_with("/pre") { result.push_str("\n```\n"); }
                 else if tag.len() > 1 && tag.starts_with('a') && (tag.len() == 1 || tag.as_bytes()[1] == b' ' || tag.as_bytes()[1] == b'\t') {
                     result.push('[');
                 }
@@ -272,7 +276,8 @@ impl Tool for WebSearchTool {
                 "type": "object",
                 "properties": {
                     "query": { "type": "string", "description": "Search query" },
-                    "max_results": { "type": "integer", "description": "Max results to return (default: 5)" }
+                    "max_results": { "type": "integer", "description": "Max results to return (default: 5)" },
+                    "timeout": { "type": "integer", "description": "Timeout in seconds (default: 15, max: 60)" }
                 },
                 "required": ["query"]
             }),
@@ -287,6 +292,14 @@ impl Tool for WebSearchTool {
         if query.is_empty() {
             return Err(maix_core::MaixError::Tool("web_search: query is required".into()));
         }
+        if query.len() > 1000 {
+            return Err(maix_core::MaixError::Tool("web_search: query too long (max 1KB)".into()));
+        }
+        if max_results == 0 || max_results > 20 {
+            return Err(maix_core::MaixError::Tool("web_search: max_results must be 1-20".into()));
+        }
+
+        let timeout_secs = args["timeout"].as_u64().unwrap_or(15).min(60);
 
         let url = format!(
             "https://html.duckduckgo.com/html/?q={}",
@@ -295,7 +308,7 @@ impl Tool for WebSearchTool {
 
         let resp = self.client
             .get(&url)
-            .timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(timeout_secs))
             .send()
             .await
             .map_err(|e| maix_core::MaixError::Tool(format!("web_search: {e}")))?;
@@ -432,7 +445,8 @@ impl Tool for HttpRequestTool {
                 "properties": {
                     "url": { "type": "string", "description": "Target URL" },
                     "method": { "type": "string", "description": "HTTP method (GET, POST, PUT, DELETE, PATCH)" },
-                    "body": { "type": "string", "description": "Request body (optional)" }
+                    "body": { "type": "string", "description": "Request body (optional)" },
+                    "timeout": { "type": "integer", "description": "Timeout in seconds (default: 30, max: 300)" }
                 },
                 "required": ["url"]
             }),
@@ -448,6 +462,19 @@ impl Tool for HttpRequestTool {
         if url.is_empty() {
             return Err(maix_core::MaixError::Tool("http_request: url is required".into()));
         }
+        if url.len() > 4096 {
+            return Err(maix_core::MaixError::Tool("http_request: url too long (max 4KB)".into()));
+        }
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err(maix_core::MaixError::Tool("http_request: url must start with http:// or https://".into()));
+        }
+        if let Some(b) = body {
+            if b.len() > 1_000_000 {
+                return Err(maix_core::MaixError::Tool("http_request: body too large (max 1MB)".into()));
+            }
+        }
+
+        let timeout_secs = args["timeout"].as_u64().unwrap_or(30).min(300);
 
         let mut req = match method.to_uppercase().as_str() {
             "GET" => self.client.get(url),
@@ -461,6 +488,8 @@ impl Tool for HttpRequestTool {
         if let Some(b) = body {
             req = req.body(b.to_string());
         }
+
+        req = req.timeout(std::time::Duration::from_secs(timeout_secs));
 
         let resp = req.send().await
             .map_err(|e| maix_core::MaixError::Tool(format!("http_request: {e}")))?;

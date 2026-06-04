@@ -150,6 +150,10 @@ impl Profiler {
             durations.push(start.elapsed());
         }
 
+        if durations.is_empty() {
+            return Err(maix_core::MaixError::Tool("benchmark: no iterations completed".into()));
+        }
+
         durations.sort();
 
         let total_duration: Duration = durations.iter().sum();

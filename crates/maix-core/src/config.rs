@@ -276,9 +276,13 @@ fn ensure_user_settings() {
             if let Ok(content) = std::fs::read_to_string(&legacy) {
                 if let Ok(settings) = toml::from_str::<UserSettings>(&content) {
                     if let Ok(json) = serde_json::to_string_pretty(&settings) {
-                        let _ = std::fs::create_dir_all(maix_dir);
-                        let _ = std::fs::write(&path, json);
-                        tracing::info!("migrated legacy config.toml to settings.json");
+                        if let Err(e) = std::fs::create_dir_all(maix_dir) {
+                            tracing::warn!("Failed to create config dir: {e}");
+                        } else if let Err(e) = std::fs::write(&path, json) {
+                            tracing::warn!("Failed to migrate config: {e}");
+                        } else {
+                            tracing::info!("migrated legacy config.toml to settings.json");
+                        }
                     }
                 }
             }
@@ -289,9 +293,13 @@ fn ensure_user_settings() {
     if !path.exists() {
         let default_settings = UserSettings::default();
         if let Ok(json) = serde_json::to_string_pretty(&default_settings) {
-            let _ = std::fs::create_dir_all(maix_dir);
-            let _ = std::fs::write(&path, json);
-            tracing::info!("created default settings at {}", path.display());
+            if let Err(e) = std::fs::create_dir_all(maix_dir) {
+                tracing::warn!("Failed to create config dir: {e}");
+            } else if let Err(e) = std::fs::write(&path, json) {
+                tracing::warn!("Failed to write default settings: {e}");
+            } else {
+                tracing::info!("created default settings at {}", path.display());
+            }
         }
     }
 
@@ -580,6 +588,83 @@ mod tests {
         let errors = validate_config(&config);
         assert!(errors.is_empty());
     }
+
+    #[test]
+    fn test_config_minimal_defaults() {
+        let config = Config::minimal();
+        assert!(config.provider.is_empty());
+        assert!(config.api_key.is_empty());
+        assert!(config.api_base.is_empty());
+        assert!(config.model.is_empty());
+        assert_eq!(config.agent.max_tool_rounds, 16);
+    }
+
+    #[test]
+    fn test_config_user_settings() {
+        let mut config = Config::minimal();
+        config.provider = "openai".into();
+        config.api_key = "sk-test12345678".into();
+        let settings = config.user_settings();
+        assert_eq!(settings.provider, "openai");
+        assert_eq!(settings.api_key, "sk-test12345678");
+    }
+
+    #[test]
+    fn test_export_config_masks_long_key() {
+        let mut config = Config::minimal();
+        config.api_key = "sk-1234567890abcdef".into();
+        let json = export_config(&config).unwrap();
+        assert!(json.contains("sk-1..."));
+        assert!(!json.contains("sk-1234567890abcdef"));
+    }
+
+    #[test]
+    fn test_export_config_masks_short_key() {
+        let mut config = Config::minimal();
+        config.api_key = "short".into();
+        let json = export_config(&config).unwrap();
+        assert!(json.contains("shor..."));
+    }
+
+    #[test]
+    fn test_export_config_empty_key() {
+        let config = Config::minimal();
+        let json = export_config(&config).unwrap();
+        assert!(json.contains(r#""api_key": """#));
+    }
+
+    #[test]
+    fn test_import_config_valid() {
+        let json = r#"{"provider":"openai","api_key":"sk-test","api_base":"https://api.openai.com/v1","model":"gpt-4","agent":{"max_tool_rounds":16,"context_threshold":0.9,"mode":"agent"},"memory":{"max_episodic_entries":500},"tools":{},"hooks":{},"env":{}}"#;
+        let settings = import_config(json).unwrap();
+        assert_eq!(settings.provider, "openai");
+        assert_eq!(settings.model, "gpt-4");
+    }
+
+    #[test]
+    fn test_import_config_invalid_json() {
+        let result = import_config("not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_diff_no_changes() {
+        let config = Config::minimal();
+        let diff = config_diff(&config);
+        assert!(diff.contains("No differences"));
+    }
+
+    #[test]
+    fn test_config_diff_with_changes() {
+        let mut config = Config::minimal();
+        config.provider = "anthropic".into();
+        config.model = "claude-sonnet-4-20250514".into();
+        let diff = config_diff(&config);
+        assert!(diff.contains("provider"));
+        assert!(diff.contains("anthropic"));
+        assert!(diff.contains("model"));
+        assert!(diff.contains("claude-sonnet-4-20250514"));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -644,8 +729,9 @@ pub fn export_config(config: &Config) -> MaixResult<String> {
     // Mask API key for security
     if !settings.api_key.is_empty() {
         let len = settings.api_key.len();
-        if len > 8 {
-            settings.api_key = format!("{}...{}", &settings.api_key[..4], &settings.api_key[len - 4..]);
+        if len > 4 {
+            let prefix: String = settings.api_key.chars().take(4).collect();
+            settings.api_key = format!("{prefix}...");
         } else {
             settings.api_key = "***".to_string();
         }

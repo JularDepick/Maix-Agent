@@ -52,3 +52,79 @@ impl PerfCollector {
         self.start_time = None;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    #[test]
+    fn test_perf_collector_basic() {
+        let mut collector = PerfCollector::new();
+        collector.start();
+        thread::sleep(Duration::from_millis(10));
+        collector.sample("step1");
+        assert_eq!(collector.samples().len(), 1);
+        assert_eq!(collector.samples()[0].label, "step1");
+        assert!(collector.samples()[0].duration >= Duration::from_millis(10));
+    }
+
+    #[test]
+    fn test_perf_collector_multiple_samples() {
+        let mut collector = PerfCollector::new();
+        collector.start();
+        thread::sleep(Duration::from_millis(5));
+        collector.sample("first");
+        thread::sleep(Duration::from_millis(5));
+        collector.sample("second");
+        assert_eq!(collector.samples().len(), 2);
+        assert!(collector.total_duration() >= Duration::from_millis(10));
+    }
+
+    #[test]
+    fn test_perf_collector_no_start() {
+        let mut collector = PerfCollector::new();
+        collector.sample("no-op");
+        assert_eq!(collector.samples().len(), 0);
+    }
+
+    #[test]
+    fn test_perf_collector_clear() {
+        let mut collector = PerfCollector::new();
+        collector.start();
+        collector.sample("step");
+        assert_eq!(collector.samples().len(), 1);
+        collector.clear();
+        assert_eq!(collector.samples().len(), 0);
+        assert_eq!(collector.total_duration(), Duration::default());
+    }
+
+    #[test]
+    fn test_perf_collector_new_initial_state() {
+        let collector = PerfCollector::new();
+        assert!(collector.samples().is_empty());
+        assert_eq!(collector.total_duration(), Duration::default());
+    }
+
+    #[test]
+    fn test_perf_collector_clear_then_reuse() {
+        let mut collector = PerfCollector::new();
+        collector.start();
+        collector.sample("first");
+        collector.clear();
+        // Reuse after clear
+        collector.start();
+        collector.sample("second");
+        assert_eq!(collector.samples().len(), 1);
+        assert_eq!(collector.samples()[0].label, "second");
+    }
+
+    #[test]
+    fn test_perf_collector_empty_label() {
+        let mut collector = PerfCollector::new();
+        collector.start();
+        collector.sample("");
+        assert_eq!(collector.samples().len(), 1);
+        assert_eq!(collector.samples()[0].label, "");
+    }
+}

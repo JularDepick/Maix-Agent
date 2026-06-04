@@ -3,11 +3,15 @@
 use rusqlite::{params, Connection, Transaction};
 use std::path::Path;
 
+/// Database operation result type.
 pub type DbResult<T> = Result<T, rusqlite::Error>;
 
 const SCHEMA_VERSION: u32 = 1;
 
-/// Central database holding all persistent state.
+/// Central SQLite database holding all persistent state.
+///
+/// Manages memories, tasks, sessions, messages, identities, skills,
+/// and agent architectures in a single WAL-mode SQLite file.
 pub struct Database {
     conn: Connection,
 }
@@ -72,11 +76,7 @@ impl Database {
         session_id: Option<&str>,
         embedding: Option<&[f32]>,
     ) -> DbResult<()> {
-        let emb_blob: Option<Vec<u8>> = embedding.map(|v| {
-            v.iter()
-                .flat_map(|f| f.to_le_bytes())
-                .collect()
-        });
+        let emb_blob: Option<Vec<u8>> = embedding.map(embedding_to_blob);
         let now = chrono::Utc::now().to_rfc3339();
         self.conn.execute(
             "INSERT INTO memories (id, content, kind, importance, session_id, embedding, created_at, updated_at)
@@ -93,7 +93,7 @@ impl Database {
         kind: Option<&str>,
         limit: usize,
     ) -> DbResult<Vec<MemoryRow>> {
-        let query_pattern = format!("%{query}%");
+        let query_pattern = make_like_pattern(query);
         if let Some(k) = kind {
             self.query_memories(
                 "SELECT id, content, kind, importance, session_id, created_at
@@ -453,17 +453,10 @@ impl Database {
                         if let Ok(content) = std::fs::read_to_string(&p) {
                             for line in content.lines().filter(|l| !l.trim().is_empty()) {
                                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-                                    let kind = val["kind"].as_str().unwrap_or("semantic");
-                                    if kind_filter.is_none_or(|k| k == kind) {
-                                        let id = val["id"].as_str().unwrap_or("");
-                                        let content = val["content"].as_str().unwrap_or("");
-                                        let importance =
-                                            val["importance"].as_f64().unwrap_or(0.5) as f32;
-                                        let session_id =
-                                            val["metadata"]["session_id"].as_str();
-                                        if !id.is_empty() {
+                                    if let Some((id, content, kind, importance, session_id)) = parse_jsonl_memory(&val) {
+                                        if kind_filter.is_none_or(|k| k == kind.as_str()) {
                                             let _ = self.insert_memory(
-                                                id, content, kind, importance, session_id, None,
+                                                &id, &content, &kind, importance, session_id.as_deref(), None,
                                             );
                                             count += 1;
                                         }
@@ -488,23 +481,29 @@ impl Database {
 // Row types
 // ---------------------------------------------------------------------------
 
+/// A stored memory entry (episodic, semantic, or working).
 #[derive(Debug, Clone)]
 pub struct MemoryRow {
     pub id: String,
     pub content: String,
+    /// One of: "episodic", "semantic", "working".
     pub kind: String,
+    /// Relevance score (0.0–1.0).
     pub importance: f32,
     pub session_id: Option<String>,
     pub created_at: String,
 }
 
+/// A persisted task with its execution state.
 #[derive(Debug, Clone)]
 pub struct TaskRow {
     pub id: String,
     pub description: String,
     pub input: String,
     pub priority: u8,
+    /// One of: "Pending", "Running", "Suspended", "Blocked", "Done", "Failed".
     pub status: String,
+    /// JSON array of task IDs this task depends on.
     pub depends_on_json: String,
     pub assigned: Option<String>,
     pub retries: u32,
@@ -514,6 +513,7 @@ pub struct TaskRow {
     pub finished_at: Option<String>,
 }
 
+/// A conversation session.
 #[derive(Debug, Clone)]
 pub struct SessionRow {
     pub id: String,
@@ -523,45 +523,56 @@ pub struct SessionRow {
     pub message_count: i64,
 }
 
+/// A single message in a session.
 #[derive(Debug, Clone)]
 pub struct MessageRow {
     pub id: i64,
     pub session_id: String,
+    /// "user", "assistant", or "system".
     pub role: String,
     pub content: String,
+    /// Optional JSON array of tool calls.
     pub tool_calls_json: Option<String>,
     pub token_count: i64,
     pub created_at: String,
 }
 
+/// A stored agent identity/persona.
 #[derive(Debug, Clone)]
 pub struct IdentityRow {
     pub id: String,
     pub name: String,
     pub description: String,
     pub system_prompt: String,
+    /// JSON array of personality trait strings.
     pub personality_traits_json: String,
+    /// JSON array of knowledge domain strings.
     pub knowledge_domains_json: String,
     pub tone: String,
     pub created_at: String,
 }
 
+/// An installed skill plugin.
 #[derive(Debug, Clone)]
 pub struct SkillRow {
     pub id: String,
     pub name: String,
     pub version: String,
+    /// Runtime type (e.g., "prompt-only", "wasm").
     pub runtime: String,
+    /// Full skill manifest as JSON.
     pub manifest_json: String,
     pub enabled: bool,
     pub installed_at: String,
 }
 
+/// A saved agent architecture configuration.
 #[derive(Debug, Clone)]
 pub struct ArchitectureRow {
     pub id: String,
     pub name: String,
     pub description: String,
+    /// Architecture configuration as JSON.
     pub config_json: String,
     pub created_at: String,
 }
@@ -745,6 +756,33 @@ CREATE TABLE IF NOT EXISTS agent_architectures (
 ";
 
 // ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
+
+/// Convert an f32 embedding slice to little-endian bytes for BLOB storage.
+pub fn embedding_to_blob(embedding: &[f32]) -> Vec<u8> {
+    embedding.iter().flat_map(|f| f.to_le_bytes()).collect()
+}
+
+/// Parse a single JSONL line into (id, content, kind, importance, session_id).
+pub fn parse_jsonl_memory(val: &serde_json::Value) -> Option<(String, String, String, f32, Option<String>)> {
+    let id = val["id"].as_str()?;
+    if id.is_empty() {
+        return None;
+    }
+    let content = val["content"].as_str().unwrap_or("").to_string();
+    let kind = val["kind"].as_str().unwrap_or("semantic").to_string();
+    let importance = val["importance"].as_f64().unwrap_or(0.5) as f32;
+    let session_id = val["metadata"]["session_id"].as_str().map(|s| s.to_string());
+    Some((id.to_string(), content, kind, importance, session_id))
+}
+
+/// Build a SQL LIKE pattern for text search.
+pub fn make_like_pattern(query: &str) -> String {
+    format!("%{query}%")
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -874,5 +912,239 @@ mod tests {
         let mut db = Database::open_in_memory().unwrap();
         db.migrate().unwrap();
         // If we get here without error, idempotent migration works
+    }
+
+    #[test]
+    fn test_embedding_to_blob_empty() {
+        let blob = embedding_to_blob(&[]);
+        assert!(blob.is_empty());
+    }
+
+    #[test]
+    fn test_embedding_to_blob_values() {
+        let blob = embedding_to_blob(&[1.0f32, -1.0]);
+        assert_eq!(blob.len(), 8); // 2 floats * 4 bytes each
+        // 1.0f32 in LE = [0, 0, 128, 63]
+        assert_eq!(&blob[0..4], &1.0f32.to_le_bytes());
+        assert_eq!(&blob[4..8], &(-1.0f32).to_le_bytes());
+    }
+
+    #[test]
+    fn test_embedding_to_blob_roundtrip() {
+        let original = vec![0.5f32, -0.25, std::f32::consts::PI];
+        let blob = embedding_to_blob(&original);
+        let recovered: Vec<f32> = blob.chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn test_parse_jsonl_memory_valid() {
+        let val = serde_json::json!({
+            "id": "mem1",
+            "content": "hello",
+            "kind": "episodic",
+            "importance": 0.8,
+            "metadata": {"session_id": "s1"}
+        });
+        let (id, content, kind, importance, session_id) = parse_jsonl_memory(&val).unwrap();
+        assert_eq!(id, "mem1");
+        assert_eq!(content, "hello");
+        assert_eq!(kind, "episodic");
+        assert!((importance - 0.8).abs() < 0.01);
+        assert_eq!(session_id.as_deref(), Some("s1"));
+    }
+
+    #[test]
+    fn test_parse_jsonl_memory_defaults() {
+        let val = serde_json::json!({"id": "mem2", "content": "test"});
+        let (_, _, kind, importance, session_id) = parse_jsonl_memory(&val).unwrap();
+        assert_eq!(kind, "semantic");
+        assert!((importance - 0.5).abs() < 0.01);
+        assert!(session_id.is_none());
+    }
+
+    #[test]
+    fn test_parse_jsonl_memory_empty_id() {
+        let val = serde_json::json!({"id": "", "content": "test"});
+        assert!(parse_jsonl_memory(&val).is_none());
+    }
+
+    #[test]
+    fn test_parse_jsonl_memory_missing_id() {
+        let val = serde_json::json!({"content": "test"});
+        assert!(parse_jsonl_memory(&val).is_none());
+    }
+
+    #[test]
+    fn test_make_like_pattern() {
+        assert_eq!(make_like_pattern("hello"), "%hello%");
+        assert_eq!(make_like_pattern(""), "%%");
+    }
+
+    #[test]
+    fn test_memory_with_embedding() {
+        let db = Database::open_in_memory().unwrap();
+        let emb = vec![0.1f32, 0.2, 0.3];
+        db.insert_memory("m-emb", "content", "semantic", 0.5, None, Some(&emb)).unwrap();
+        assert_eq!(db.memory_count().unwrap(), 1);
+        // Verify we can search it
+        let rows = db.search_memories("content", None, 10).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_memory_with_session_id() {
+        let db = Database::open_in_memory().unwrap();
+        db.create_session("s-mem", "test").unwrap();
+        db.insert_memory("m-sess", "session memory", "episodic", 0.7, Some("s-mem"), None).unwrap();
+        let rows = db.search_memories_by_session("s-mem", "episodic", 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session_id.as_deref(), Some("s-mem"));
+    }
+
+    #[test]
+    fn test_memory_episodic_kind() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_memory("m-ep", "episodic data", "episodic", 0.6, None, None).unwrap();
+        db.insert_memory("m-se", "semantic data", "semantic", 0.6, None, None).unwrap();
+        db.insert_memory("m-wo", "working data", "working", 0.6, None, None).unwrap();
+        assert_eq!(db.memory_count().unwrap(), 3);
+        let ep = db.list_memories(Some("episodic"), 10).unwrap();
+        assert_eq!(ep.len(), 1);
+        assert_eq!(ep[0].kind, "episodic");
+    }
+
+    #[test]
+    fn test_search_memories_with_kind() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_memory("m1", "alpha semantic", "semantic", 0.5, None, None).unwrap();
+        db.insert_memory("m2", "alpha episodic", "episodic", 0.5, None, None).unwrap();
+        let rows = db.search_memories("alpha", Some("semantic"), 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind, "semantic");
+    }
+
+    #[test]
+    fn test_list_memories_with_kind() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_memory("m1", "a", "semantic", 0.5, None, None).unwrap();
+        db.insert_memory("m2", "b", "episodic", 0.5, None, None).unwrap();
+        db.insert_memory("m3", "c", "semantic", 0.5, None, None).unwrap();
+        let sem = db.list_memories(Some("semantic"), 10).unwrap();
+        assert_eq!(sem.len(), 2);
+    }
+
+    #[test]
+    fn test_delete_memory_nonexistent() {
+        let db = Database::open_in_memory().unwrap();
+        assert!(!db.delete_memory("no-such-id").unwrap());
+    }
+
+    #[test]
+    fn test_search_memories_by_session_empty() {
+        let db = Database::open_in_memory().unwrap();
+        let rows = db.search_memories_by_session("no-session", "semantic", 10).unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_update_task_status_done() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_task("t-done", "task", "", 5, "[]", 3).unwrap();
+        db.update_task_status("t-done", "Done", None).unwrap();
+        let tasks = db.list_tasks(Some("Done")).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert!(tasks[0].finished_at.is_some());
+    }
+
+    #[test]
+    fn test_list_tasks_all() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_task("t1", "a", "", 5, "[]", 3).unwrap();
+        db.insert_task("t2", "b", "", 3, "[]", 3).unwrap();
+        db.update_task_status("t1", "Running", Some("agent")).unwrap();
+        let all = db.list_tasks(None).unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn test_delete_task_nonexistent() {
+        let db = Database::open_in_memory().unwrap();
+        assert!(!db.delete_task("no-such-task").unwrap());
+    }
+
+    #[test]
+    fn test_delete_session_nonexistent() {
+        let db = Database::open_in_memory().unwrap();
+        assert!(!db.delete_session("no-such-session").unwrap());
+    }
+
+    #[test]
+    fn test_session_cascade_deletes_messages() {
+        let db = Database::open_in_memory().unwrap();
+        db.create_session("s-cascade", "test").unwrap();
+        db.insert_message("s-cascade", "user", "hello", None, 10).unwrap();
+        db.insert_message("s-cascade", "assistant", "hi", None, 5).unwrap();
+        assert_eq!(db.list_messages("s-cascade", None).unwrap().len(), 2);
+
+        db.delete_session("s-cascade").unwrap();
+        // Messages should be cascade-deleted
+        let msgs = db.list_messages("s-cascade", None).unwrap();
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn test_insert_message_with_tool_calls() {
+        let db = Database::open_in_memory().unwrap();
+        db.create_session("s-tc", "test").unwrap();
+        let tc = r#"[{"id":"call-1","name":"read_file","args":{}}]"#;
+        let msg_id = db.insert_message("s-tc", "assistant", "", Some(tc), 20).unwrap();
+        assert!(msg_id > 0);
+        let msgs = db.list_messages("s-tc", None).unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert!(msgs[0].tool_calls_json.is_some());
+    }
+
+    #[test]
+    fn test_list_messages_with_limit() {
+        let db = Database::open_in_memory().unwrap();
+        db.create_session("s-lim", "test").unwrap();
+        for i in 0..5 {
+            db.insert_message("s-lim", "user", &format!("msg{i}"), None, 10).unwrap();
+        }
+        let all = db.list_messages("s-lim", None).unwrap();
+        assert_eq!(all.len(), 5);
+        let limited = db.list_messages("s-lim", Some(2)).unwrap();
+        assert_eq!(limited.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_jsonl_memory_non_object() {
+        assert!(parse_jsonl_memory(&serde_json::json!("string")).is_none());
+        assert!(parse_jsonl_memory(&serde_json::json!(42)).is_none());
+        assert!(parse_jsonl_memory(&serde_json::json!(true)).is_none());
+        assert!(parse_jsonl_memory(&serde_json::json!(null)).is_none());
+        assert!(parse_jsonl_memory(&serde_json::json!([1, 2])).is_none());
+    }
+
+    #[test]
+    fn test_parse_jsonl_memory_importance_integer() {
+        let val = serde_json::json!({"id": "m-int", "content": "test", "importance": 1});
+        let (_, _, _, importance, _) = parse_jsonl_memory(&val).unwrap();
+        assert!((importance - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_embedding_to_blob_single() {
+        let blob = embedding_to_blob(&[42.0]);
+        assert_eq!(blob.len(), 4);
+        assert_eq!(&blob, &42.0f32.to_le_bytes());
+    }
+
+    #[test]
+    fn test_make_like_pattern_unicode() {
+        assert_eq!(make_like_pattern("你好"), "%你好%");
     }
 }

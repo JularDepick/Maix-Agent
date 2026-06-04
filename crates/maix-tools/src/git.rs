@@ -332,7 +332,7 @@ impl Tool for GitBlameTool {
                     if line.len() >= 40 && line.chars().take(40).all(|c| c.is_ascii_hexdigit()) {
                         // Commit hash line
                         let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 3 {
+                        if parts.len() >= 3 && parts[0].len() >= 8 {
                             current_hash = parts[0][..8].to_string();
                         }
                     } else if let Some(val) = line.strip_prefix("author ") {
@@ -1031,4 +1031,39 @@ pub async fn worktree_list(repo_path: &std::path::Path) -> MaixResult<Vec<String
         }
     }
     Ok(worktrees)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_lines_short_text() {
+        let text = "line1\nline2\nline3";
+        assert_eq!(truncate_lines(text, 5), text);
+    }
+
+    #[test]
+    fn test_truncate_lines_exact() {
+        let text = "line1\nline2\nline3";
+        assert_eq!(truncate_lines(text, 3), text);
+    }
+
+    #[test]
+    fn test_truncate_lines_truncated() {
+        let text = "line1\nline2\nline3\nline4\nline5";
+        let result = truncate_lines(text, 2);
+        assert!(result.starts_with("line1\nline2"));
+        assert!(result.contains("3 more lines truncated"));
+    }
+
+    #[test]
+    fn test_truncate_lines_empty() {
+        assert_eq!(truncate_lines("", 5), "");
+    }
+
+    #[test]
+    fn test_truncate_lines_single_line() {
+        assert_eq!(truncate_lines("hello", 1), "hello");
+    }
 }

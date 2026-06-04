@@ -125,4 +125,68 @@ mod tests {
         // e1 should rank high (recent + keyword match + high importance)
         assert_eq!(results[0].entry.id, "e1");
     }
+
+    #[test]
+    fn test_bm25_score_keyword_match() {
+        let entry = make_entry("e1", "Rust is a systems programming language", 0.5, 0);
+        let score = HybridRetriever::bm25_score(&entry, "Rust");
+        assert!(score > 0.0);
+
+        let no_match = HybridRetriever::bm25_score(&entry, "Python");
+        assert_eq!(no_match, 0.0);
+    }
+
+    #[test]
+    fn test_bm25_score_empty_content() {
+        let entry = make_entry("e1", "", 0.5, 0);
+        let score = HybridRetriever::bm25_score(&entry, "test");
+        assert_eq!(score, 0.0);
+    }
+
+    #[test]
+    fn test_bm25_score_case_insensitive() {
+        let entry = make_entry("e1", "RUST is great", 0.5, 0);
+        let score_lower = HybridRetriever::bm25_score(&entry, "rust");
+        let score_upper = HybridRetriever::bm25_score(&entry, "RUST");
+        assert!((score_lower - score_upper).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_retrieval_top_k() {
+        let entries: Vec<_> = (0..10)
+            .map(|i| make_entry(&format!("e{i}"), "test content", 0.5, i))
+            .collect();
+        let embeddings: Vec<Embedding> = entries.iter().map(|_| vec![0.1; 128]).collect();
+        let query_emb = vec![0.2; 128];
+
+        let results = HybridRetriever::retrieve(&entries, &embeddings, &query_emb, "test", 3);
+        assert!(results.len() <= 3);
+    }
+
+    #[test]
+    fn test_retrieval_empty() {
+        let results = HybridRetriever::retrieve(&[], &[], &[], "query", 5);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_retrieval_no_embeddings() {
+        let entries = vec![make_entry("e1", "test content", 0.5, 0)];
+        let results = HybridRetriever::retrieve(&entries, &[], &[0.1; 128], "test", 5);
+        // Should still work with BM25 scoring even without embeddings
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn test_scored_entry_ordering() {
+        let entries = vec![
+            make_entry("old", "irrelevant", 0.1, 365),
+            make_entry("new", "relevant keyword match", 0.9, 0),
+        ];
+        let embeddings: Vec<Embedding> = entries.iter().map(|_| vec![0.1; 128]).collect();
+        let results = HybridRetriever::retrieve(&entries, &embeddings, &[0.1; 128], "relevant", 10);
+        if results.len() >= 2 {
+            assert!(results[0].score >= results[1].score);
+        }
+    }
 }

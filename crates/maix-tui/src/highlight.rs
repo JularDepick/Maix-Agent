@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Lightweight syntax highlighting for code blocks.
 //!
 //! Token-based lexer for Rust, Python, TypeScript, Go with keyword/string/comment coloring.
@@ -17,6 +16,7 @@ pub enum TokenKind {
     Plain,
 }
 
+#[allow(dead_code)]
 impl TokenKind {
     /// ANSI color code for this token kind.
     pub fn color(&self) -> &'static str {
@@ -45,6 +45,7 @@ pub struct HighlightedToken {
     pub kind: TokenKind,
 }
 
+#[allow(dead_code)]
 impl HighlightedToken {
     pub fn new(text: &str, kind: TokenKind) -> Self {
         Self {
@@ -267,6 +268,7 @@ pub struct SimpleHighlighter {
     language: Language,
 }
 
+#[allow(dead_code)]
 impl SimpleHighlighter {
     pub fn new(language: Language) -> Self {
         Self { language }

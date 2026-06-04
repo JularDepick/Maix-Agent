@@ -3,21 +3,27 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
+/// Unique task identifier.
 pub type TaskId = String;
+/// Unique agent identifier.
 pub type AgentId = String;
 
+/// A unit of work to be executed by an agent.
 #[derive(Debug, Clone)]
 pub struct Task {
     pub id: TaskId,
     pub description: String,
     pub input: String,
+    /// Higher value = higher priority.
     pub priority: u8,
+    /// Task IDs that must complete before this one can run.
     pub depends_on: Vec<TaskId>,
     pub deadline: Option<Instant>,
     pub retry: RetryPolicy,
     pub created_at: Instant,
 }
 
+/// Controls how many times a failed task is retried.
 #[derive(Debug, Clone, Copy)]
 pub struct RetryPolicy {
     pub max_retries: u32,
@@ -30,16 +36,24 @@ impl RetryPolicy {
     }
 }
 
+/// Current state of a task in the queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
+    /// Waiting to be picked up.
     Pending,
+    /// Currently being executed.
     Running,
+    /// Temporarily paused.
     Suspended,
+    /// Waiting on dependencies.
     Blocked,
+    /// Successfully completed.
     Done,
+    /// Failed after exhausting retries.
     Failed,
 }
 
+/// A task plus its execution state.
 #[derive(Debug, Clone)]
 pub struct TaskEntry {
     pub task: Task,
@@ -580,6 +594,131 @@ mod tests {
         assert_eq!(q2.len(), 2);
 
         let next = q2.pop_next().unwrap();
+        assert_eq!(next.task.id, "t1");
+    }
+
+    #[test]
+    fn test_complete_success() {
+        // Use from_json to create a Running entry (pop_next removes entries)
+        let json = r#"{"entries":[{"id":"t1","description":"task","input":"","priority":5,"depends_on":[],"status":"Running","assigned":null,"retries":0,"max_retries":3}]}"#;
+        let mut q = TaskQueue::new();
+        q.from_json(json).unwrap();
+
+        q.complete("t1", true).unwrap();
+        let entry = q.get("t1").unwrap();
+        assert_eq!(entry.status, TaskStatus::Done);
+        assert!(entry.finished_at.is_some());
+    }
+
+    #[test]
+    fn test_complete_fail_with_retry() {
+        let json = r#"{"entries":[{"id":"t1","description":"task","input":"","priority":5,"depends_on":[],"status":"Running","assigned":null,"retries":0,"max_retries":2}]}"#;
+        let mut q = TaskQueue::new();
+        q.from_json(json).unwrap();
+
+        q.complete("t1", false).unwrap();
+        let entry = q.get("t1").unwrap();
+        assert_eq!(entry.status, TaskStatus::Pending); // retried
+        assert_eq!(entry.task.retry.retries, 1);
+    }
+
+    #[test]
+    fn test_complete_fail_exhausted() {
+        let json = r#"{"entries":[{"id":"t1","description":"task","input":"","priority":5,"depends_on":[],"status":"Running","assigned":null,"retries":1,"max_retries":1}]}"#;
+        let mut q = TaskQueue::new();
+        q.from_json(json).unwrap();
+
+        q.complete("t1", false).unwrap();
+        let entry = q.get("t1").unwrap();
+        assert_eq!(entry.status, TaskStatus::Failed);
+    }
+
+    #[test]
+    fn test_cancel_returns_entry() {
+        let mut q = TaskQueue::new();
+        q.enqueue(make_task("t1", "task one", 5));
+        q.enqueue(make_task("t2", "task two", 3));
+
+        let removed = q.cancel("t1").unwrap();
+        assert_eq!(removed.task.id, "t1");
+        assert_eq!(q.len(), 1);
+        assert!(q.get("t1").is_none());
+        assert!(q.get("t2").is_some());
+    }
+
+    #[test]
+    fn test_insert_before() {
+        let mut q = TaskQueue::new();
+        q.enqueue(make_task("t1", "first", 5));
+        q.enqueue(make_task("t3", "third", 5));
+        q.insert(make_task("t2", "second", 5), InsertAt::Before("t3".into())).unwrap();
+
+        let entries: Vec<_> = q.list().iter().map(|e| e.task.id.as_str()).collect();
+        assert_eq!(entries, vec!["t1", "t2", "t3"]);
+    }
+
+    #[test]
+    fn test_insert_after_missing_target() {
+        let mut q = TaskQueue::new();
+        q.enqueue(make_task("t1", "first", 5));
+        let result = q.insert(make_task("t2", "bad", 5), InsertAt::After("nonexistent".into()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reposition_before() {
+        let mut q = TaskQueue::new();
+        q.enqueue(make_task("t1", "first", 5));
+        q.enqueue(make_task("t2", "second", 5));
+        q.enqueue(make_task("t3", "third", 5));
+
+        q.reposition("t3", InsertAt::Before("t1".into())).unwrap();
+        let entries: Vec<_> = q.list().iter().map(|e| e.task.id.as_str()).collect();
+        assert_eq!(entries, vec!["t3", "t1", "t2"]);
+    }
+
+    #[test]
+    fn test_from_json_unknown_status() {
+        let json = r#"{"entries":[{"id":"t1","description":"task","input":"","priority":5,"depends_on":[],"status":"UnknownStatus","assigned":null,"retries":0,"max_retries":3}]}"#;
+        let mut q = TaskQueue::new();
+        let count = q.from_json(json).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(q.get("t1").unwrap().status, TaskStatus::Pending); // defaults to Pending
+    }
+
+    #[test]
+    fn test_chained_dependencies_ordering() {
+        // Test that chained dependencies are resolved in correct order
+        let mut q = TaskQueue::new();
+        let mut t1 = make_task("t1", "first", 5);
+        t1.depends_on = vec!["t2".into()];
+        let mut t2 = make_task("t2", "second", 5);
+        t2.depends_on = vec!["t3".into()];
+        q.enqueue(t1);
+        q.enqueue(t2);
+        q.enqueue(make_task("t3", "third", 1));
+
+        // t3 is the only unblocked task despite lowest priority
+        let next = q.pop_next().unwrap();
+        assert_eq!(next.task.id, "t3");
+
+        // t1 and t2 are still blocked (dependencies not resolved since t3 was popped)
+        assert!(q.pop_next().is_none());
+    }
+
+    #[test]
+    fn test_chained_dependencies_resolved() {
+        // Use from_json to set up a state where dependencies are resolved
+        let json = r#"{"entries":[
+            {"id":"t1","description":"first","input":"","priority":5,"depends_on":["t2"],"status":"Pending","assigned":null,"retries":0,"max_retries":3},
+            {"id":"t2","description":"second","input":"","priority":5,"depends_on":[],"status":"Done","assigned":null,"retries":0,"max_retries":3},
+            {"id":"t3","description":"third","input":"","priority":1,"depends_on":[],"status":"Done","assigned":null,"retries":0,"max_retries":3}
+        ]}"#;
+        let mut q = TaskQueue::new();
+        q.from_json(json).unwrap();
+
+        // t1 is unblocked because t2 is Done
+        let next = q.pop_next().unwrap();
         assert_eq!(next.task.id, "t1");
     }
 }

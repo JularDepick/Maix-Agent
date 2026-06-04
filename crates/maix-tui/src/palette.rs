@@ -1,10 +1,10 @@
-#![allow(dead_code)]
 //! Command palette — fuzzy search for commands, files, and symbols.
 //!
 //! Activated with Ctrl+P, provides a popup overlay with search-as-you-type.
 
 /// Command category for grouping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum CommandCategory {
     Command,
     File,
@@ -12,6 +12,7 @@ pub enum CommandCategory {
     Recent,
 }
 
+#[allow(dead_code)]
 impl CommandCategory {
     pub fn label(&self) -> &'static str {
         match self {
@@ -38,12 +39,15 @@ pub struct PaletteEntry {
     pub label: String,
     pub description: String,
     pub category: CommandCategory,
+    #[allow(dead_code)]
     pub action: PaletteAction,
+    #[allow(dead_code)]
     pub score: f32,
 }
 
 /// Action to execute when an entry is selected.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum PaletteAction {
     RunCommand(String),
     OpenFile(String),
@@ -60,6 +64,7 @@ pub struct CommandPalette {
     visible: bool,
 }
 
+#[allow(dead_code)]
 impl CommandPalette {
     pub fn new() -> Self {
         Self {
@@ -267,6 +272,7 @@ fn fuzzy_score(query: &str, target: &str) -> f32 {
 }
 
 /// Default commands for the palette.
+#[allow(dead_code)]
 pub fn default_commands() -> Vec<PaletteEntry> {
     vec![
         PaletteEntry {

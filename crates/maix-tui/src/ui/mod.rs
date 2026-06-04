@@ -1,6 +1,12 @@
 //! UI rendering with ratatui.
 
+pub mod markdown;
+pub mod theme;
+
+pub use theme::Theme;
+
 use crate::app::{mode_name, App, ActivePanel, ChatMessage};
+use markdown::{highlight_search_matches, render_markdown};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -8,205 +14,6 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
     Frame,
 };
-
-/// UI theme colors.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Theme {
-    pub accent: Color,
-    pub dim: Color,
-    pub warn: Color,
-    pub bg: Color,
-    pub fg: Color,
-    pub border: Color,
-    pub user_msg: Color,
-    pub assistant_msg: Color,
-    pub system_msg: Color,
-    pub error_msg: Color,
-    pub success_msg: Color,
-}
-
-impl Theme {
-    pub fn dark() -> Self {
-        Self {
-            accent: Color::Cyan,
-            dim: Color::DarkGray,
-            warn: Color::Yellow,
-            bg: Color::Reset,
-            fg: Color::White,
-            border: Color::DarkGray,
-            user_msg: Color::Green,
-            assistant_msg: Color::White,
-            system_msg: Color::DarkGray,
-            error_msg: Color::Red,
-            success_msg: Color::Green,
-        }
-    }
-
-    pub fn light() -> Self {
-        Self {
-            accent: Color::Blue,
-            dim: Color::Gray,
-            warn: Color::Rgb(200, 150, 0),
-            bg: Color::White,
-            fg: Color::Black,
-            border: Color::Gray,
-            user_msg: Color::Rgb(0, 100, 0),
-            assistant_msg: Color::Black,
-            system_msg: Color::Gray,
-            error_msg: Color::Red,
-            success_msg: Color::Rgb(0, 150, 0),
-        }
-    }
-
-    pub fn solarized_dark() -> Self {
-        Self {
-            accent: Color::Rgb(38, 139, 210),
-            dim: Color::Rgb(88, 110, 117),
-            warn: Color::Rgb(181, 137, 0),
-            bg: Color::Rgb(0, 43, 54),
-            fg: Color::Rgb(131, 148, 150),
-            border: Color::Rgb(88, 110, 117),
-            user_msg: Color::Rgb(42, 161, 152),
-            assistant_msg: Color::Rgb(131, 148, 150),
-            system_msg: Color::Rgb(88, 110, 117),
-            error_msg: Color::Rgb(220, 50, 47),
-            success_msg: Color::Rgb(42, 161, 152),
-        }
-    }
-
-    pub fn dracula() -> Self {
-        Self {
-            accent: Color::Rgb(189, 147, 249),
-            dim: Color::Rgb(98, 114, 164),
-            warn: Color::Rgb(241, 250, 140),
-            bg: Color::Rgb(40, 42, 54),
-            fg: Color::Rgb(248, 248, 242),
-            border: Color::Rgb(98, 114, 164),
-            user_msg: Color::Rgb(80, 250, 123),
-            assistant_msg: Color::Rgb(248, 248, 242),
-            system_msg: Color::Rgb(98, 114, 164),
-            error_msg: Color::Rgb(255, 85, 85),
-            success_msg: Color::Rgb(80, 250, 123),
-        }
-    }
-
-    pub fn high_contrast() -> Self {
-        Self {
-            accent: Color::Yellow,
-            dim: Color::White,
-            warn: Color::Rgb(255, 165, 0),
-            bg: Color::Black,
-            fg: Color::White,
-            border: Color::White,
-            user_msg: Color::Cyan,
-            assistant_msg: Color::White,
-            system_msg: Color::White,
-            error_msg: Color::Red,
-            success_msg: Color::Green,
-        }
-    }
-
-    pub fn from_name(name: &str) -> Self {
-        match name.to_lowercase().as_str() {
-            "light" => Self::light(),
-            "solarized" | "solarized-dark" => Self::solarized_dark(),
-            "dracula" => Self::dracula(),
-            "high-contrast" | "hc" => Self::high_contrast(),
-            "custom" => Self::load_custom(),
-            _ => Self::dark(),
-        }
-    }
-
-    /// Load custom theme from configuration file.
-    fn load_custom() -> Self {
-        let home = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let theme_path = home.join(".maix").join("theme.json");
-
-        if let Ok(content) = std::fs::read_to_string(&theme_path) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                let parse_color = |key: &str, default: Color| -> Color {
-                    if let Some(val) = json.get(key).and_then(|v| v.as_str()) {
-                        parse_hex_color(val).unwrap_or(default)
-                    } else {
-                        default
-                    }
-                };
-
-                return Self {
-                    accent: parse_color("accent", Color::Cyan),
-                    dim: parse_color("dim", Color::DarkGray),
-                    warn: parse_color("warn", Color::Yellow),
-                    bg: parse_color("bg", Color::Reset),
-                    fg: parse_color("fg", Color::White),
-                    border: parse_color("border", Color::DarkGray),
-                    user_msg: parse_color("user_msg", Color::Green),
-                    assistant_msg: parse_color("assistant_msg", Color::White),
-                    system_msg: parse_color("system_msg", Color::DarkGray),
-                    error_msg: parse_color("error_msg", Color::Red),
-                    success_msg: parse_color("success_msg", Color::Green),
-                };
-            }
-        }
-
-        // Fallback to dark theme if custom config not found
-        Self::dark()
-    }
-
-    /// Export current theme to JSON string.
-    pub fn to_json(&self) -> String {
-        let color_to_hex = |c: &Color| -> String {
-            match c {
-                Color::Reset => "#000000".to_string(),
-                Color::Black => "#000000".to_string(),
-                Color::Red => "#ff0000".to_string(),
-                Color::Green => "#00ff00".to_string(),
-                Color::Yellow => "#ffff00".to_string(),
-                Color::Blue => "#0000ff".to_string(),
-                Color::Magenta => "#ff00ff".to_string(),
-                Color::Cyan => "#00ffff".to_string(),
-                Color::White => "#ffffff".to_string(),
-                Color::DarkGray => "#555555".to_string(),
-                Color::Gray => "#aaaaaa".to_string(),
-                Color::Rgb(r, g, b) => format!("#{:02x}{:02x}{:02x}", r, g, b),
-                _ => "#000000".to_string(),
-            }
-        };
-
-        serde_json::json!({
-            "accent": color_to_hex(&self.accent),
-            "dim": color_to_hex(&self.dim),
-            "warn": color_to_hex(&self.warn),
-            "bg": color_to_hex(&self.bg),
-            "fg": color_to_hex(&self.fg),
-            "border": color_to_hex(&self.border),
-            "user_msg": color_to_hex(&self.user_msg),
-            "assistant_msg": color_to_hex(&self.assistant_msg),
-            "system_msg": color_to_hex(&self.system_msg),
-            "error_msg": color_to_hex(&self.error_msg),
-            "success_msg": color_to_hex(&self.success_msg),
-        }).to_string()
-    }
-
-    pub fn available_themes() -> Vec<&'static str> {
-        vec!["dark", "light", "solarized", "dracula", "high-contrast", "custom"]
-    }
-}
-
-/// Parse hex color string like "#ff0000" or "ff0000" to Color.
-fn parse_hex_color(s: &str) -> Option<Color> {
-    let s = s.trim().trim_start_matches('#');
-    if s.len() == 6 {
-        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-        Some(Color::Rgb(r, g, b))
-    } else {
-        None
-    }
-}
 
 // Default theme constants (dark)
 const ACCENT: Color = Color::Cyan;
@@ -357,15 +164,20 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         String::new()
     };
 
+    let git_display = app.git_status.as_ref()
+        .map(|g| format!(" │ {}", g.display()))
+        .unwrap_or_default();
+
     let spans = vec![
         Span::styled(
             format!(" {} ", spinner),
             Style::default().bg(ACCENT).fg(Color::Black),
         ),
         Span::styled(
-            format!(" Maix-Agent │ {} │ 上下文:{}% │ token:{}{}{} │ ¥{:.4} │ {}{} ",
+            format!(" Maix-Agent │ {} │ 上下文:{}% │ token:{}{}{} │ ¥{:.4} │ {}{}{} ",
                 app.model_name, ctx_pct, format_tokens(app.total_tokens), cache_display, rate_display, app.total_cost, mode_name(app.mode),
-                if app.vim.enabled { format!(" │ VIM:{}", app.vim.mode) } else { String::new() }),
+                if app.vim.enabled { format!(" │ VIM:{}", app.vim.mode) } else { String::new() },
+                git_display),
             Style::default().bg(ACCENT).fg(Color::Black),
         ),
     ];
@@ -620,7 +432,7 @@ fn render_chat(f: &mut Frame, area: Rect, app: &App) {
     }
 
     // Virtual scrolling: only render visible lines
-    let visible_height = chat_area.height as usize - 2;
+    let visible_height = (chat_area.height as usize).saturating_sub(2);
     let total_lines = all_lines.len();
     let scroll = app.chat_scroll.min(total_lines.saturating_sub(visible_height));
     let start = total_lines.saturating_sub(visible_height + scroll);
@@ -682,7 +494,12 @@ fn render_minimap(f: &mut Frame, area: Rect, app: &App, total_lines: usize, visi
                 _ => 1,
             }).sum::<usize>();
 
-            if line_idx >= msg_start && line_idx < msg_start + 1 {
+            let msg_lines = match msg {
+                ChatMessage::User(t) => t.lines().count() + 1,
+                ChatMessage::Assistant(t) => t.lines().count() + 2,
+                _ => 1,
+            };
+            if line_idx >= msg_start && line_idx < msg_start + msg_lines {
                 Some(msg)
             } else {
                 None
@@ -934,15 +751,15 @@ fn render_stats_panel(f: &mut Frame, area: Rect, app: &App) {
     };
 
     // Generate token usage bar chart
-    let bar_width = 20;
+    let bar_width: usize = 20;
     let max_tokens = app.prompt_tokens.max(app.completion_tokens).max(app.cache_read_tokens).max(1);
     let prompt_bar_len = ((app.prompt_tokens as f64 / max_tokens as f64) * bar_width as f64) as usize;
     let completion_bar_len = ((app.completion_tokens as f64 / max_tokens as f64) * bar_width as f64) as usize;
     let cache_bar_len = ((app.cache_read_tokens as f64 / max_tokens as f64) * bar_width as f64) as usize;
 
-    let prompt_bar = format!("{}{}", "█".repeat(prompt_bar_len), "░".repeat(bar_width - prompt_bar_len));
-    let completion_bar = format!("{}{}", "█".repeat(completion_bar_len), "░".repeat(bar_width - completion_bar_len));
-    let cache_bar = format!("{}{}", "█".repeat(cache_bar_len), "░".repeat(bar_width - cache_bar_len));
+    let prompt_bar = format!("{}{}", "█".repeat(prompt_bar_len), "░".repeat(bar_width.saturating_sub(prompt_bar_len)));
+    let completion_bar = format!("{}{}", "█".repeat(completion_bar_len), "░".repeat(bar_width.saturating_sub(completion_bar_len)));
+    let cache_bar = format!("{}{}", "█".repeat(cache_bar_len), "░".repeat(bar_width.saturating_sub(cache_bar_len)));
 
     let lines = vec![
         Line::from(vec![Span::styled(" 会话", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))]),
@@ -1104,11 +921,23 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
         f.render_widget(list, comp_area);
     }
 
-    // Render input box
+    // Build focus hint with context suggestions when input is empty
+    let context_hint;
     let focus_hint = if app.selected_index.is_some() {
         "↑↓ 导航 │ Enter 选择 │ Esc 取消"
     } else if has_completions {
         "↑↓ 选择 │ Tab 循环 │ Enter 确认 │ Esc 取消"
+    } else if app.input.buffer.is_empty() {
+        let ctx = app.get_context_suggestions();
+        let time = app.get_smart_history_suggestions();
+        let mut all: Vec<String> = ctx.into_iter().chain(time).collect();
+        all.dedup();
+        if all.is_empty() {
+            "/help 帮助 │ Shift+Enter 换行"
+        } else {
+            context_hint = all.join(" │ ");
+            context_hint.as_str()
+        }
     } else {
         "/help 帮助 │ Shift+Enter 换行"
     };
@@ -1237,7 +1066,7 @@ fn render_palette(f: &mut Frame, area: Rect, app: &App) {
     // Get filtered entries
     let entries = palette.filtered_entries();
     let selected = palette.selected_index();
-    let max_visible = (height - 3) as usize; // Subtract borders and query line
+    let max_visible = (height.saturating_sub(3)) as usize; // Subtract borders and query line
 
     let mut items: Vec<ListItem> = Vec::new();
 
@@ -1318,384 +1147,4 @@ fn render_search(f: &mut Frame, area: Rect, app: &App) {
         );
 
     f.render_widget(search_block, search_area);
-}
-
-/// Render markdown text with basic formatting.
-/// Supports: headings (#), code blocks (```), inline code (`), bold (**), bullet lists (-/*)
-fn render_markdown(text: &str) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    let mut in_code_block = false;
-    let mut code_lang = String::new();
-    let mut _code_line_num = 0;
-    let mut code_block_lines: Vec<String> = Vec::new();
-    let max_code_lines = 30; // Fold code blocks longer than this
-
-    for line in text.lines() {
-        // Code block toggle
-        if line.starts_with("```") {
-            if in_code_block {
-                in_code_block = false;
-                // Render collected code block with folding
-                if code_block_lines.len() > max_code_lines {
-                    // Show first N lines
-                    for (i, code_line) in code_block_lines.iter().take(max_code_lines).enumerate() {
-                        let language = crate::highlight::Language::from_extension(&code_lang);
-                        let highlighter = crate::highlight::SimpleHighlighter::new(language);
-                        let tokens = highlighter.highlight_line(code_line);
-
-                        let line_num_str = format!("{:>3}│ ", i + 1);
-                        let mut spans = vec![Span::styled(line_num_str, Style::default().fg(DIM))];
-                        for token in tokens {
-                            let color = match token.kind {
-                                crate::highlight::TokenKind::Keyword => Color::Blue,
-                                crate::highlight::TokenKind::String => Color::Green,
-                                crate::highlight::TokenKind::Comment => Color::DarkGray,
-                                crate::highlight::TokenKind::Number => Color::Cyan,
-                                crate::highlight::TokenKind::Function => Color::Yellow,
-                                crate::highlight::TokenKind::Type => Color::Magenta,
-                                crate::highlight::TokenKind::Operator => Color::White,
-                                crate::highlight::TokenKind::Punctuation => Color::White,
-                                crate::highlight::TokenKind::Plain => Color::Green,
-                            };
-                            spans.push(Span::styled(token.text, Style::default().fg(color)));
-                        }
-                        lines.push(Line::from(spans));
-                    }
-                    // Show fold indicator
-                    let remaining = code_block_lines.len() - max_code_lines;
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("  │ ... {} 行已折叠 (输入 'unfold' 展开)", remaining), Style::default().fg(ACCENT)),
-                    ]));
-                } else {
-                    // Render all lines
-                    for (i, code_line) in code_block_lines.iter().enumerate() {
-                        let language = crate::highlight::Language::from_extension(&code_lang);
-                        let highlighter = crate::highlight::SimpleHighlighter::new(language);
-                        let tokens = highlighter.highlight_line(code_line);
-
-                        let line_num_str = format!("{:>3}│ ", i + 1);
-                        let mut spans = vec![Span::styled(line_num_str, Style::default().fg(DIM))];
-                        for token in tokens {
-                            let color = match token.kind {
-                                crate::highlight::TokenKind::Keyword => Color::Blue,
-                                crate::highlight::TokenKind::String => Color::Green,
-                                crate::highlight::TokenKind::Comment => Color::DarkGray,
-                                crate::highlight::TokenKind::Number => Color::Cyan,
-                                crate::highlight::TokenKind::Function => Color::Yellow,
-                                crate::highlight::TokenKind::Type => Color::Magenta,
-                                crate::highlight::TokenKind::Operator => Color::White,
-                                crate::highlight::TokenKind::Punctuation => Color::White,
-                                crate::highlight::TokenKind::Plain => Color::Green,
-                            };
-                            spans.push(Span::styled(token.text, Style::default().fg(color)));
-                        }
-                        lines.push(Line::from(spans));
-                    }
-                }
-                code_block_lines.clear();
-                code_lang.clear();
-                lines.push(Line::from(vec![
-                    Span::styled("  └───────────────────────────", Style::default().fg(DIM)),
-                ]));
-            } else {
-                in_code_block = true;
-                code_lang = line.strip_prefix("```").unwrap_or("").trim().to_string();
-                _code_line_num = 0;
-                code_block_lines.clear();
-                let lang_display = if code_lang.is_empty() {
-                    "code".to_string()
-                } else {
-                    code_lang.clone()
-                };
-                lines.push(Line::from(vec![
-                    Span::styled(format!("  ┌─ {} ─", lang_display), Style::default().fg(DIM)),
-                    Span::styled("  [C 复制]", Style::default().fg(ACCENT)),
-                ]));
-            }
-            continue;
-        }
-
-        if in_code_block {
-            // Collect code block lines for folding
-            code_block_lines.push(line.to_string());
-            continue;
-        }
-
-        // Heading
-        if let Some(text) = line.strip_prefix("# ") {
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(
-                    text.to_string(),
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                ),
-            ]));
-            continue;
-        }
-        if let Some(text) = line.strip_prefix("## ") {
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(
-                    text.to_string(),
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                ),
-            ]));
-            continue;
-        }
-        if let Some(text) = line.strip_prefix("### ") {
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(
-                    text.to_string(),
-                    Style::default().fg(WARN).add_modifier(Modifier::BOLD),
-                ),
-            ]));
-            continue;
-        }
-
-        // Bullet list
-        if line.starts_with("- ") || line.starts_with("* ") {
-            let mut spans = vec![
-                Span::styled("  ", Style::default()),
-                Span::styled("* ", Style::default().fg(ACCENT)),
-            ];
-            spans.extend(parse_inline(&line[2..]));
-            lines.push(Line::from(spans));
-            continue;
-        }
-
-        // Task list
-        if line.starts_with("- [ ] ") || line.starts_with("* [ ] ") {
-            let mut spans = vec![
-                Span::styled("  ", Style::default()),
-                Span::styled("☐ ", Style::default().fg(DIM)),
-            ];
-            spans.extend(parse_inline(&line[6..]));
-            lines.push(Line::from(spans));
-            continue;
-        }
-        if line.starts_with("- [x] ") || line.starts_with("* [x] ") {
-            let mut spans = vec![
-                Span::styled("  ", Style::default()),
-                Span::styled("☑ ", Style::default().fg(Color::Green)),
-            ];
-            spans.extend(parse_inline(&line[6..]));
-            lines.push(Line::from(spans));
-            continue;
-        }
-
-        // Table row (contains |)
-        if line.contains('|') && line.trim().starts_with('|') {
-            let cells: Vec<&str> = line.split('|').filter(|s| !s.trim().is_empty()).collect();
-            if !cells.is_empty() {
-                // Check if separator row (---|---|---)
-                if cells.iter().all(|c| c.trim().chars().all(|ch| ch == '-' || ch == ' ' || ch == ':')) {
-                    lines.push(Line::from(vec![
-                        Span::styled("  ───────────────────────────", Style::default().fg(DIM)),
-                    ]));
-                    continue;
-                }
-                // Regular table row
-                let mut spans = vec![Span::styled("  ", Style::default())];
-                for (i, cell) in cells.iter().enumerate() {
-                    if i > 0 {
-                        spans.push(Span::styled(" │ ", Style::default().fg(DIM)));
-                    }
-                    spans.extend(parse_inline(cell.trim()));
-                }
-                lines.push(Line::from(spans));
-                continue;
-            }
-        }
-
-        // Blockquote
-        if line.starts_with("> ") {
-            let mut spans = vec![
-                Span::styled("  ", Style::default()),
-                Span::styled("│ ", Style::default().fg(ACCENT)),
-            ];
-            spans.extend(parse_inline(&line[2..]));
-            lines.push(Line::from(spans));
-            continue;
-        }
-
-        // Regular line with inline formatting
-        let mut spans = vec![Span::styled("  ", Style::default())];
-        spans.extend(parse_inline(line));
-        lines.push(Line::from(spans));
-    }
-
-    lines
-}
-
-/// Smart wrap text preserving indentation.
-#[allow(dead_code)]
-fn smart_wrap_line(text: &str, max_width: usize) -> Vec<String> {
-    if text.len() <= max_width {
-        return vec![text.to_string()];
-    }
-
-    // Calculate indentation
-    let indent = text.len() - text.trim_start().len();
-    let indent_str = &text[..indent];
-    let content = text.trim_start();
-
-    let mut result = Vec::new();
-    let mut current_line = String::new();
-    let mut current_len = 0;
-
-    for word in content.split_whitespace() {
-        if current_len + word.len() + 1 > max_width - indent && !current_line.is_empty() {
-            result.push(current_line);
-            current_line = format!("{}{}", indent_str, word);
-            current_len = indent + word.len();
-        } else {
-            if !current_line.is_empty() {
-                current_line.push(' ');
-                current_len += 1;
-            }
-            current_line.push_str(word);
-            current_len += word.len();
-        }
-    }
-
-    if !current_line.is_empty() {
-        result.push(current_line);
-    }
-
-    result
-}
-
-/// Parse inline markdown: `code`, **bold**, *italic*, and plain text.
-/// Highlight search matches in text (100-002).
-fn highlight_search_matches(text: &str, query: &str) -> Vec<Span<'static>> {
-    if query.is_empty() || text.is_empty() {
-        return vec![Span::raw(text.to_string())];
-    }
-
-    let lower_text = text.to_lowercase();
-    let lower_query = query.to_lowercase();
-    let mut spans = Vec::new();
-    let mut last_end = 0;
-
-    while let Some(pos) = lower_text[last_end..].find(&lower_query) {
-        let abs_pos = last_end + pos;
-        // Add text before match
-        if abs_pos > last_end {
-            spans.push(Span::raw(text[last_end..abs_pos].to_string()));
-        }
-        // Add highlighted match
-        let match_end = abs_pos + query.len();
-        spans.push(Span::styled(
-            text[abs_pos..match_end].to_string(),
-            Style::default().bg(Color::Yellow).fg(Color::Black),
-        ));
-        last_end = match_end;
-    }
-
-    // Add remaining text
-    if last_end < text.len() {
-        spans.push(Span::raw(text[last_end..].to_string()));
-    }
-
-    if spans.is_empty() {
-        vec![Span::raw(text.to_string())]
-    } else {
-        spans
-    }
-}
-
-fn parse_inline(text: &str) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
-    let mut plain = String::new();
-
-    while i < len {
-        // Inline code: `...`
-        if chars[i] == '`' {
-            if !plain.is_empty() {
-                spans.push(Span::raw(plain.clone()));
-                plain.clear();
-            }
-            let end = chars[i + 1..].iter().position(|&c| c == '`').map(|p| p + i + 1);
-            if let Some(end_idx) = end {
-                let code: String = chars[i + 1..end_idx].iter().collect();
-                spans.push(Span::styled(
-                    format!(" {} ", code),
-                    Style::default().bg(Color::DarkGray).fg(Color::White),
-                ));
-                i = end_idx + 1;
-                continue;
-            }
-        }
-
-        // Bold: **...**
-        if i + 1 < len && chars[i] == '*' && chars[i + 1] == '*' {
-            if !plain.is_empty() {
-                spans.push(Span::raw(plain.clone()));
-                plain.clear();
-            }
-            let remaining: String = chars[i + 2..].iter().collect();
-            if let Some(end_pos) = remaining.find("**") {
-                let bold_text: String = chars[i + 2..i + 2 + end_pos].iter().collect();
-                spans.push(Span::styled(
-                    bold_text,
-                    Style::default().add_modifier(Modifier::BOLD),
-                ));
-                i = i + 2 + end_pos + 2;
-                continue;
-            }
-        }
-
-        // Italic: *...* (single asterisk, not at word boundary)
-        if chars[i] == '*' && (i + 1 < len && chars[i + 1] != '*') {
-            if !plain.is_empty() {
-                spans.push(Span::raw(plain.clone()));
-                plain.clear();
-            }
-            let remaining: String = chars[i + 1..].iter().collect();
-            if let Some(end_pos) = remaining.find('*') {
-                let italic_text: String = chars[i + 1..i + 1 + end_pos].iter().collect();
-                spans.push(Span::styled(
-                    italic_text,
-                    Style::default().fg(Color::Yellow),
-                ));
-                i = i + 1 + end_pos + 1;
-                continue;
-            }
-        }
-
-        // Link: [text](url) - render as underlined text
-        if chars[i] == '[' {
-            if !plain.is_empty() {
-                spans.push(Span::raw(plain.clone()));
-                plain.clear();
-            }
-            let remaining: String = chars[i..].iter().collect();
-            if let Some(bracket_end) = remaining.find(']') {
-                if i + bracket_end + 1 < len && chars[i + bracket_end + 1] == '(' {
-                    if let Some(paren_end) = remaining[bracket_end + 2..].find(')') {
-                        let link_text: String = chars[i + 1..i + bracket_end].iter().collect();
-                        spans.push(Span::styled(
-                            link_text,
-                            Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED),
-                        ));
-                        i = i + bracket_end + 2 + paren_end + 1;
-                        continue;
-                    }
-                }
-            }
-        }
-
-        plain.push(chars[i]);
-        i += 1;
-    }
-
-    if !plain.is_empty() {
-        spans.push(Span::raw(plain));
-    }
-
-    spans
 }

@@ -17,14 +17,13 @@ pub fn init_console_utf8() {
     let _ = ();
 }
 
-/// Mask an API key for safe logging (show first 4 + last 4 chars).
+/// Mask an API key for safe logging (show first 4 chars only).
 pub fn mask_key(key: &str) -> String {
-    if key.len() <= 8 {
+    if key.len() <= 4 {
         return "***".into();
     }
-    let prefix = &key[..4];
-    let suffix = &key[key.len() - 4..];
-    format!("{prefix}...{suffix}")
+    let prefix: String = key.chars().take(4).collect();
+    format!("{prefix}...")
 }
 
 /// Sanitize a string that might contain API keys or secrets.
@@ -54,7 +53,7 @@ pub fn sanitize_for_log(s: &str) -> String {
 
 /// Check if a string contains sensitive patterns (API keys, tokens).
 pub fn contains_sensitive(s: &str) -> bool {
-    let patterns = ["sk-", "sk-", "api-key", "Bearer ", "eyJ", "-----BEGIN"];
+    let patterns = ["sk-", "api-key", "Bearer ", "eyJ", "-----BEGIN"];
     patterns.iter().any(|p| s.to_lowercase().contains(&p.to_lowercase()))
 }
 
@@ -70,7 +69,7 @@ mod tests {
     #[test]
     fn test_mask_key_normal() {
         let masked = mask_key("sk-1234567890abcdef");
-        assert_eq!(masked, "sk-1...cdef");
+        assert_eq!(masked, "sk-1...");
     }
 
     #[test]

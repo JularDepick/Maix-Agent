@@ -29,15 +29,14 @@ $notify.ShowBalloonTip(5000, '{}', '{}', [System.Windows.Forms.ToolTipIcon]::Inf
 
     #[cfg(target_os = "macos")]
     {
+        // Pass values via environment variables to avoid shell injection
         let _ = std::process::Command::new("osascript")
             .args([
                 "-e",
-                &format!(
-                    "display notification \"{}\" with title \"{}\"",
-                    body.replace('"', "\\\""),
-                    title.replace('"', "\\\"")
-                ),
+                "display notification (system attribute \"MAIX_NOTIFY_BODY\") with title (system attribute \"MAIX_NOTIFY_TITLE\")",
             ])
+            .env("MAIX_NOTIFY_TITLE", title)
+            .env("MAIX_NOTIFY_BODY", body)
             .output();
     }
 

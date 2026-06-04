@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Agent Desk — virtual workspace with sticky notes, pinned files, and task board.
 //!
 //! Inspired by OpenHanako's "Desk" metaphor: a persistent workspace per session
@@ -22,6 +21,7 @@ pub enum NoteColor {
 
 
 impl NoteColor {
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "blue" | "b" => Self::Blue,
@@ -54,6 +54,7 @@ pub struct StickyNote {
     pub pinned: bool,
 }
 
+#[allow(dead_code)]
 impl StickyNote {
     pub fn new(id: &str, content: &str, color: NoteColor) -> Self {
         let now = Utc::now();
@@ -78,6 +79,7 @@ pub struct PinnedFile {
     pub pinned_at: DateTime<Utc>,
 }
 
+#[allow(dead_code)]
 impl PinnedFile {
     /// Create a pinned file, reading the first `preview_lines` lines as preview.
     pub fn new(path: &Path, preview_lines: usize) -> std::io::Result<Self> {
@@ -120,6 +122,7 @@ pub enum TaskStatus {
 }
 
 impl TaskStatus {
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Todo => "todo",
@@ -146,6 +149,7 @@ pub struct BoardTask {
     pub created_at: DateTime<Utc>,
 }
 
+#[allow(dead_code)]
 impl BoardTask {
     pub fn new(id: &str, title: &str) -> Self {
         Self {
@@ -163,6 +167,7 @@ pub struct TaskBoard {
     pub tasks: Vec<BoardTask>,
 }
 
+#[allow(dead_code)]
 impl TaskBoard {
     pub fn add_task(&mut self, id: &str, title: &str) {
         self.tasks.push(BoardTask::new(id, title));
@@ -205,9 +210,11 @@ pub struct AgentDesk {
     pub task_board: TaskBoard,
     pub workspace_path: PathBuf,
     #[serde(skip)]
+    #[allow(dead_code)]
     preview_lines: usize,
 }
 
+#[allow(dead_code)]
 impl AgentDesk {
     pub fn new(workspace_path: PathBuf) -> Self {
         Self {

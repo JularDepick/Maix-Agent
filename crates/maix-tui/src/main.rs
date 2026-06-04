@@ -1,14 +1,44 @@
+//! # Maix-TUI
+//!
+//! Terminal User Interface for Maix-Agent — a rich, interactive terminal client.
+//!
+//! ## Features
+//!
+//! - **Chat interface** — message history, streaming responses, tool execution
+//! - **Vim mode** — optional vim-style keybindings for navigation
+//! - **Multi-panel layout** — chat, memory, tools, stats panels
+//! - **Command palette** — fuzzy search for commands (Ctrl+P)
+//! - **Search** — full-text search across conversation (Ctrl+F)
+//! - **Theme system** — customizable colors (dark, light, solarized, dracula)
+//! - **Diff viewer** — side-by-side code diff rendering
+//! - **Notifications** — sound and visual notifications for events
+//! - **Session management** — multiple sessions, auto-save, resume
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────┐
+//! │                  TUI                    │
+//! │  ┌─────────┐  ┌─────────┐  ┌─────────┐ │
+//! │  │  Chat   │  │ Memory  │  │  Tools  │ │
+//! │  │ Panel   │  │ Panel   │  │  Panel  │ │
+//! │  └─────────┘  └─────────┘  └─────────┘ │
+//! │  ┌─────────────────────────────────────┐ │
+//! │  │           Input Bar                 │ │
+//! │  └─────────────────────────────────────┘ │
+//! └─────────────────────────────────────────┘
+//! ```
+
 mod app;
-mod clipboard;
 mod desk;
 mod diff_view;
+mod git_status;
 mod highlight;
 mod input;
 mod layout;
 mod notify;
 mod palette;
 mod pane;
-mod status_bar;
 mod stream_renderer;
 mod ui;
 mod vim;
@@ -82,7 +112,7 @@ fn cleanup_old_logs(log_dir: &std::path::Path, max_days: u64) -> io::Result<()> 
     for entry in std::fs::read_dir(log_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().map_or(false, |ext| ext == "log") {
+        if path.extension().is_some_and(|ext| ext == "log") {
             if let Ok(metadata) = entry.metadata() {
                 if let Ok(modified) = metadata.modified() {
                     if modified < cutoff {
@@ -122,7 +152,7 @@ async fn main() -> io::Result<()> {
             let _ = writeln!(file, "=== Crash at {} ===", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
             let _ = writeln!(file, "{}", panic_info);
             let _ = writeln!(file, "Location: {:?}", panic_info.location());
-            let _ = writeln!(file, "");
+            let _ = writeln!(file);
         }
 
         // Print user-friendly error message

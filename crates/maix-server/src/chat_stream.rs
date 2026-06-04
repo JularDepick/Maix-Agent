@@ -153,3 +153,116 @@ pub async fn read_next_inbound(
         None => Ok(None),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_agent_event_text_delta() {
+        let output = agent_event_to_chat_output("s1", AgentEvent::TextDelta("hello".into()));
+        match output.output {
+            Some(pb::chat_output::Output::TextDelta(td)) => {
+                assert_eq!(td.session_id, "s1");
+                assert_eq!(td.text, "hello");
+            }
+            _ => panic!("expected TextDelta"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_thinking() {
+        let output = agent_event_to_chat_output("s1", AgentEvent::Thinking);
+        match output.output {
+            Some(pb::chat_output::Output::Status(s)) => {
+                assert_eq!(s.session_id, "s1");
+            }
+            _ => panic!("expected Status"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_error() {
+        let output = agent_event_to_chat_output("s1", AgentEvent::Error("fail".into()));
+        match output.output {
+            Some(pb::chat_output::Output::Error(e)) => {
+                assert_eq!(e.session_id, "s1");
+                assert_eq!(e.message, "fail");
+                assert_eq!(e.code, "AGENT_ERROR");
+            }
+            _ => panic!("expected Error"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_tool_result() {
+        let output = agent_event_to_chat_output(
+            "s1",
+            AgentEvent::ToolResult {
+                id: "call-1".into(),
+                result: "ok".into(),
+            },
+        );
+        match output.output {
+            Some(pb::chat_output::Output::ToolResult(tr)) => {
+                assert_eq!(tr.tool_call_id, "call-1");
+                assert_eq!(tr.result, "ok");
+            }
+            _ => panic!("expected ToolResult"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_response_complete() {
+        let usage = TokenUsage {
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            total_tokens: 150,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        };
+        let output = agent_event_to_chat_output(
+            "s1",
+            AgentEvent::ResponseComplete {
+                text: "done".into(),
+                usage,
+            },
+        );
+        match output.output {
+            Some(pb::chat_output::Output::Complete(c)) => {
+                assert_eq!(c.text, "done");
+                let u = c.usage.unwrap();
+                assert_eq!(u.total_tokens, 150);
+            }
+            _ => panic!("expected Complete"),
+        }
+    }
+
+    #[test]
+    fn test_agent_event_reasoning_delta() {
+        let output = agent_event_to_chat_output("s1", AgentEvent::ReasoningDelta("thinking...".into()));
+        match output.output {
+            Some(pb::chat_output::Output::ReasoningDelta(rd)) => {
+                assert_eq!(rd.text, "thinking...");
+            }
+            _ => panic!("expected ReasoningDelta"),
+        }
+    }
+
+    #[test]
+    fn test_pb_usage() {
+        let u = TokenUsage {
+            prompt_tokens: 10,
+            completion_tokens: 20,
+            total_tokens: 30,
+            cache_read_tokens: 5,
+            cache_write_tokens: 3,
+        };
+        let pb = pb_usage(u);
+        assert_eq!(pb.prompt_tokens, 10);
+        assert_eq!(pb.completion_tokens, 20);
+        assert_eq!(pb.total_tokens, 30);
+        assert_eq!(pb.cache_read_tokens, 5);
+        assert_eq!(pb.cache_write_tokens, 3);
+    }
+}

@@ -69,7 +69,8 @@ pub fn scan_project_files(root: &Path) -> String {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 // Truncate large files
                 let truncated = if content.len() > 2000 {
-                    format!("{}...\n(truncated)", &content[..2000])
+                    let end = content.char_indices().nth(2000).map(|(i, _)| i).unwrap_or(content.len());
+                    format!("{}...\n(truncated)", &content[..end])
                 } else {
                     content
                 };
@@ -116,23 +117,18 @@ fn build_tree_recursive(
         .collect();
 
     for (i, entry) in entries.iter().enumerate() {
-        let is_last = i == entries.len() - 1;
+        let is_last = i + 1 == entries.len();
         let connector = if is_last { "└── " } else { "├── " };
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        let file_type = entry.file_type().unwrap_or_else(|_| {
-            // fallback: treat as file
+        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or_else(|_| {
             std::fs::metadata(entry.path())
-                .map(|m| m.file_type())
-                .unwrap_or_else(|_| {
-                    // Create a dummy FileType — this is hacky but works
-                    // We'll just check is_dir below
-                    entry.file_type().unwrap()
-                })
+                .map(|m| m.is_dir())
+                .unwrap_or(false)
         });
 
-        if file_type.is_dir() {
+        if is_dir {
             output.push_str(&format!("{prefix}{connector}{name_str}/\n"));
             let new_prefix = if is_last { "    " } else { "│   " };
             build_tree_recursive(

@@ -140,7 +140,7 @@ impl CompactionStrategy for ToolResultSummarizer {
                 };
 
                 Message {
-                    role: m.role.clone(),
+                    role: m.role,
                     content: MessageContent::Text(truncated),
                     name: m.name.clone(),
                     tool_call_id: m.tool_call_id.clone(),

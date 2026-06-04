@@ -1,4 +1,37 @@
-//! Memory system — working / episodic / semantic with file-based + SQLite storage (Phase 2).
+//! # Maix-Memory
+//!
+//! Memory system for Maix-Agent — working, episodic, and semantic memory
+//! with file-based and SQLite storage.
+//!
+//! ## Memory Types
+//!
+//! - **Working memory** — short-term context for current session
+//! - **Episodic memory** — past interactions and events
+//! - **Semantic memory** — facts, knowledge, and learned information
+//!
+//! ## Storage Backends
+//!
+//! - **FileMemoryStore** — JSON-based file storage (simple, portable)
+//! - **SqliteMemoryStore** — SQLite database (efficient, full-text search)
+//!
+//! ## Features
+//!
+//! - **BM25 search** — relevance-based memory retrieval
+//! - **Importance scoring** — prioritize important memories
+//! - **Compaction** — summarize and compress old memories
+//! - **Embedding** — vector-based semantic search (optional)
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────┐
+//! │   MemoryStore   │ ◄── Trait interface
+//! └────────┬────────┘
+//!          │
+//!    ┌─────┴─────┐
+//!    ▼           ▼
+//! FileStore   SqliteStore
+//! ```
 
 pub mod compaction;
 pub mod embedding;
@@ -314,7 +347,7 @@ impl SqliteMemoryStore {
     }
 
     pub fn import_jsonl(&self, dir: &Path) -> MaixResult<usize> {
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(db.import_memory_jsonl(dir, None).unwrap_or(0))
     }
 }
@@ -325,14 +358,14 @@ impl MemoryStore for SqliteMemoryStore {
         let kind = kind_to_str(&entry.kind);
         let session_id = entry.metadata.get("session_id").map(|s| s.as_str());
         let id = entry.id.clone();
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         db.insert_memory(&id, &entry.content, kind, entry.importance, session_id, None)
             .map_err(|e| maix_core::MaixError::Memory(format!("insert memory: {e}")))?;
         Ok(id)
     }
 
     async fn search(&self, query: &str, limit: usize) -> MaixResult<Vec<MemoryEntry>> {
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let rows = db
             .search_memories(query, None, limit)
             .map_err(|e| maix_core::MaixError::Memory(format!("search memories: {e}")))?;
@@ -347,7 +380,7 @@ impl MemoryStore for SqliteMemoryStore {
     }
 
     async fn forget(&mut self, id: &str) -> MaixResult<()> {
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let deleted = db.delete_memory(id)
             .map_err(|e| maix_core::MaixError::Memory(format!("delete memory: {e}")))?;
         if deleted {
@@ -358,7 +391,7 @@ impl MemoryStore for SqliteMemoryStore {
     }
 
     async fn get_context_for_session(&self, session_id: &str, max_tokens: usize) -> MaixResult<String> {
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let char_limit = max_tokens * 3;
         let mut parts: Vec<String> = Vec::new();
         let mut char_count = 0usize;
@@ -396,7 +429,7 @@ impl MemoryStore for SqliteMemoryStore {
     }
 
     async fn list_all(&self) -> MaixResult<Vec<MemoryEntry>> {
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let rows = db
             .list_memories(None, 1000)
             .map_err(|e| maix_core::MaixError::Memory(format!("list memories: {e}")))?;
@@ -559,5 +592,100 @@ mod tests {
             let results = store.search("temporary", 5).await.unwrap();
             assert!(results.is_empty());
         }
+
+        #[tokio::test]
+        async fn test_sqlite_list_all() {
+            let mut store = SqliteMemoryStore::new_in_memory().unwrap();
+            store.save(make_entry("s1", "first", MemoryKind::Episodic)).await.unwrap();
+            store.save(make_entry("s2", "second", MemoryKind::Semantic)).await.unwrap();
+
+            let all = store.list_all().await.unwrap();
+            assert_eq!(all.len(), 2);
+        }
+
+        #[tokio::test]
+        async fn test_sqlite_list_all_empty() {
+            let store = SqliteMemoryStore::new_in_memory().unwrap();
+            let all = store.list_all().await.unwrap();
+            assert!(all.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_kind_to_str() {
+        assert_eq!(kind_to_str(&MemoryKind::Episodic), "episodic");
+        assert_eq!(kind_to_str(&MemoryKind::Semantic), "semantic");
+        assert_eq!(kind_to_str(&MemoryKind::Working), "working");
+    }
+
+    #[test]
+    fn test_str_to_kind() {
+        assert!(matches!(str_to_kind("episodic"), MemoryKind::Episodic));
+        assert!(matches!(str_to_kind("semantic"), MemoryKind::Semantic));
+        assert!(matches!(str_to_kind("working"), MemoryKind::Working));
+    }
+
+    #[test]
+    fn test_str_to_kind_unknown_defaults_semantic() {
+        assert!(matches!(str_to_kind("unknown"), MemoryKind::Semantic));
+        assert!(matches!(str_to_kind(""), MemoryKind::Semantic));
+        assert!(matches!(str_to_kind("EPISODIC"), MemoryKind::Semantic));
+    }
+
+    #[test]
+    fn test_kind_roundtrip() {
+        for kind in [MemoryKind::Episodic, MemoryKind::Semantic, MemoryKind::Working] {
+            let s = kind_to_str(&kind);
+            let back = str_to_kind(s);
+            assert!(matches!(back, k if kind_to_str(&k) == s));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_list_all() {
+        let tmp = TempDir::new().unwrap();
+        let mut store = FileMemoryStore::new(tmp.path().to_path_buf()).unwrap();
+        store.save(make_entry("e1", "aaa", MemoryKind::Episodic)).await.unwrap();
+        store.save(make_entry("e2", "bbb", MemoryKind::Semantic)).await.unwrap();
+
+        let all = store.list_all().await.unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_file_list_all_empty() {
+        let tmp = TempDir::new().unwrap();
+        let store = FileMemoryStore::new(tmp.path().to_path_buf()).unwrap();
+        let all = store.list_all().await.unwrap();
+        assert!(all.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_search_empty_query() {
+        let tmp = TempDir::new().unwrap();
+        let mut store = FileMemoryStore::new(tmp.path().to_path_buf()).unwrap();
+        store.save(make_entry("e1", "test content", MemoryKind::Episodic)).await.unwrap();
+
+        let results = store.search("", 5).await.unwrap();
+        // Empty query returns entries ordered by importance
+        assert_eq!(results.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_search_limit_zero() {
+        let tmp = TempDir::new().unwrap();
+        let mut store = FileMemoryStore::new(tmp.path().to_path_buf()).unwrap();
+        store.save(make_entry("e1", "test content", MemoryKind::Episodic)).await.unwrap();
+
+        let results = store.search("test", 0).await.unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_forget_nonexistent() {
+        let tmp = TempDir::new().unwrap();
+        let mut store = FileMemoryStore::new(tmp.path().to_path_buf()).unwrap();
+        let result = store.forget("nonexistent").await;
+        assert!(result.is_err());
     }
 }

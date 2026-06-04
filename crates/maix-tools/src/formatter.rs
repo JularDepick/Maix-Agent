@@ -167,4 +167,27 @@ mod tests {
         assert!(f.handles("rs"));
         assert!(!f.handles("py"));
     }
+
+    #[test]
+    fn test_formatter_handles_multiple_extensions() {
+        let f = Formatter {
+            name: "prettier".into(),
+            command: "npx prettier --write".into(),
+            extensions: vec!["js".into(), "ts".into(), "tsx".into()],
+        };
+        assert!(f.handles("js"));
+        assert!(f.handles("ts"));
+        assert!(f.handles("tsx"));
+        assert!(!f.handles("py"));
+    }
+
+    #[test]
+    fn test_formatter_handles_empty_extensions() {
+        let f = Formatter {
+            name: "custom".into(),
+            command: "custom-fmt".into(),
+            extensions: vec![],
+        };
+        assert!(!f.handles("rs"));
+    }
 }

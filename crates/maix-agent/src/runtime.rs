@@ -128,3 +128,75 @@ impl AgentRuntime {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_runtime() -> AgentRuntime {
+        AgentRuntime::new().with_dir(PathBuf::from("/nonexistent"))
+    }
+
+    #[test]
+    fn test_parse_profile_full() {
+        let runtime = test_runtime();
+        let toml = r#"
+name = "coder"
+description = "A coding assistant"
+tone = "friendly"
+traits = ["precise", "thorough"]
+domains = ["rust", "python"]
+system_prompt = "You are a coder."
+"#;
+        let profile = runtime.parse_profile(toml, std::path::Path::new("coder.toml")).unwrap();
+        assert_eq!(profile.name, "coder");
+        assert_eq!(profile.description, "A coding assistant");
+        assert_eq!(profile.tone, "friendly");
+        assert_eq!(profile.traits, vec!["precise", "thorough"]);
+        assert_eq!(profile.domains, vec!["rust", "python"]);
+        assert_eq!(profile.system_prompt, "You are a coder.");
+    }
+
+    #[test]
+    fn test_parse_profile_minimal() {
+        let runtime = test_runtime();
+        let toml = r#"name = "minimal""#;
+        let profile = runtime.parse_profile(toml, std::path::Path::new("minimal.toml")).unwrap();
+        assert_eq!(profile.name, "minimal");
+        assert_eq!(profile.description, "");
+        assert_eq!(profile.tone, "professional");
+        assert!(profile.traits.is_empty());
+        assert!(profile.domains.is_empty());
+    }
+
+    #[test]
+    fn test_parse_profile_name_from_filename() {
+        let runtime = test_runtime();
+        let toml = r#"description = "no name""#;
+        let profile = runtime.parse_profile(toml, std::path::Path::new("my_agent.toml")).unwrap();
+        assert_eq!(profile.name, "my_agent");
+    }
+
+    #[test]
+    fn test_parse_profile_invalid_toml() {
+        let runtime = test_runtime();
+        let result = runtime.parse_profile("not { valid toml", std::path::Path::new("bad.toml"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_set_active() {
+        let mut runtime = test_runtime();
+        runtime.profiles.push(AgentProfile {
+            name: "test".into(),
+            description: "".into(),
+            tone: "professional".into(),
+            traits: vec![],
+            domains: vec![],
+            system_prompt: "".into(),
+        });
+        assert!(runtime.set_active("test"));
+        assert_eq!(runtime.active(), Some("test"));
+        assert!(!runtime.set_active("nonexistent"));
+    }
+}

@@ -25,7 +25,7 @@ use tower_http::cors::{Any, CorsLayer};
 #[derive(Parser)]
 #[command(name = "maix-gateway", version)]
 struct Cli {
-    #[arg(long, default_value = "0.0.0.0:26507")]
+    #[arg(long, default_value = "127.0.0.1:26507")]
     listen: String,
     #[arg(long, default_value = "127.0.0.1:26506")]
     server: String,
@@ -166,8 +166,14 @@ async fn main() {
         .with_state(Arc::new(client));
 
     tracing::info!("Maix-Gateway listening on http://{listen_addr}");
-    let listener = tokio::net::TcpListener::bind(&listen_addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&listen_addr).await.unwrap_or_else(|e| {
+        eprintln!("Failed to bind to {listen_addr}: {e}");
+        std::process::exit(1);
+    });
+    axum::serve(listener, app).await.unwrap_or_else(|e| {
+        eprintln!("Server error: {e}");
+        std::process::exit(1);
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -882,5 +888,24 @@ async fn handle_ws_work_status(mut socket: WebSocket, client: Arc<MaixClient>) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_response() {
+        let resp = error_response("something went wrong");
+        let val = resp.0;
+        assert_eq!(val["error"]["message"], "something went wrong");
+    }
+
+    #[test]
+    fn test_error_response_empty() {
+        let resp = error_response("");
+        let val = resp.0;
+        assert_eq!(val["error"]["message"], "");
     }
 }

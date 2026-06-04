@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! TUI layout management — panels, tabs, and split layouts.
 
 use serde::{Deserialize, Serialize};
@@ -80,6 +79,7 @@ pub enum LayoutNode {
     },
 }
 
+#[allow(dead_code)]
 impl LayoutNode {
     /// Create a leaf node.
     pub fn leaf(panel: Panel) -> Self {
@@ -170,6 +170,7 @@ pub struct LayoutManager {
     active_tab: usize,
 }
 
+#[allow(dead_code)]
 impl LayoutManager {
     pub fn new() -> Self {
         let default_layout = LayoutNode::leaf(Panel::new("main", PanelType::Chat));

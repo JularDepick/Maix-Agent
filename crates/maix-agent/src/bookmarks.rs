@@ -38,7 +38,8 @@ impl BookmarkManager {
         };
         self.bookmarks.push(bookmark);
         self.save_to_disk();
-        self.bookmarks.last().unwrap()
+        // SAFETY: we just pushed, so bookmarks is non-empty
+        self.bookmarks.last().expect("just pushed a bookmark")
     }
 
     pub fn get(&self, name: &str) -> Option<&SessionBookmark> {
@@ -69,10 +70,14 @@ impl BookmarkManager {
 
     fn save_to_disk(&self) {
         if let Some(parent) = self.storage_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::warn!("Failed to create bookmark dir: {e}");
+            }
         }
         if let Ok(data) = serde_json::to_vec_pretty(&self.bookmarks) {
-            let _ = std::fs::write(&self.storage_path, data);
+            if let Err(e) = std::fs::write(&self.storage_path, data) {
+                tracing::warn!("Failed to save bookmarks: {e}");
+            }
         }
     }
 

@@ -94,8 +94,9 @@ fn check_api_key(config: &Config) -> DiagnosticResult {
             fix_hint: Some("在 ~/.maix/settings.json 中设置 api_key 或设置 MAIX_API_KEY 环境变量".into()),
         }
     } else {
-        let masked = if config.api_key.len() > 8 {
-            format!("{}...{}", &config.api_key[..4], &config.api_key[config.api_key.len() - 4..])
+        let masked = if config.api_key.len() > 4 {
+            let prefix: String = config.api_key.chars().take(4).collect();
+            format!("{prefix}...")
         } else {
             "***".into()
         };
@@ -365,4 +366,134 @@ pub fn format_diagnostics(results: &[DiagnosticResult]) -> String {
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_diag_status_display() {
+        assert_eq!(DiagStatus::Pass.to_string(), "✅");
+        assert_eq!(DiagStatus::Warn.to_string(), "⚠️");
+        assert_eq!(DiagStatus::Fail.to_string(), "❌");
+    }
+
+    #[test]
+    fn test_format_diagnostics_all_pass() {
+        let results = vec![
+            DiagnosticResult {
+                name: "API Key".into(),
+                status: DiagStatus::Pass,
+                message: "configured".into(),
+                fix_hint: None,
+            },
+        ];
+        let output = format_diagnostics(&results);
+        assert!(output.contains("Maix-Agent Doctor"));
+        assert!(output.contains("API Key"));
+        assert!(!output.contains("建议"));
+    }
+
+    #[test]
+    fn test_format_diagnostics_with_fixes() {
+        let results = vec![
+            DiagnosticResult {
+                name: "Database".into(),
+                status: DiagStatus::Fail,
+                message: "not found".into(),
+                fix_hint: Some("run `maix init`".into()),
+            },
+        ];
+        let output = format_diagnostics(&results);
+        assert!(output.contains("建议"));
+        assert!(output.contains("run `maix init`"));
+    }
+
+    #[test]
+    fn test_check_api_key_empty() {
+        let config = maix_core::Config::minimal();
+        let result = check_api_key(&config);
+        assert!(matches!(result.status, DiagStatus::Fail));
+        assert!(result.message.contains("未配置"));
+    }
+
+    #[test]
+    fn test_check_api_key_long() {
+        let mut config = maix_core::Config::minimal();
+        config.api_key = "sk-1234567890abcdef".into();
+        let result = check_api_key(&config);
+        assert!(matches!(result.status, DiagStatus::Pass));
+        assert!(result.message.contains("sk-1"));
+        assert!(!result.message.contains("sk-1234567890abcdef"));
+    }
+
+    #[test]
+    fn test_check_api_key_short() {
+        let mut config = maix_core::Config::minimal();
+        config.api_key = "short".into();
+        let result = check_api_key(&config);
+        assert!(matches!(result.status, DiagStatus::Pass));
+        // "short" has len 5 > 4, so shows first 4 + "..."
+        assert!(result.message.contains("shor"));
+    }
+
+    #[test]
+    fn test_format_diagnostics_empty() {
+        let results: Vec<DiagnosticResult> = vec![];
+        let output = format_diagnostics(&results);
+        assert!(output.contains("Maix-Agent Doctor"));
+        assert!(!output.contains("建议"));
+    }
+
+    #[test]
+    fn test_format_diagnostics_mixed() {
+        let results = vec![
+            DiagnosticResult {
+                name: "API Key".into(),
+                status: DiagStatus::Pass,
+                message: "configured".into(),
+                fix_hint: None,
+            },
+            DiagnosticResult {
+                name: "Database".into(),
+                status: DiagStatus::Warn,
+                message: "slow".into(),
+                fix_hint: None,
+            },
+            DiagnosticResult {
+                name: "Network".into(),
+                status: DiagStatus::Fail,
+                message: "timeout".into(),
+                fix_hint: Some("check firewall".into()),
+            },
+        ];
+        let output = format_diagnostics(&results);
+        assert!(output.contains("API Key"));
+        assert!(output.contains("Database"));
+        assert!(output.contains("Network"));
+        assert!(output.contains("建议"));
+        assert!(output.contains("check firewall"));
+    }
+
+    #[test]
+    fn test_check_api_key_exact_8() {
+        let mut config = maix_core::Config::minimal();
+        config.api_key = "12345678".into();
+        let result = check_api_key(&config);
+        assert!(matches!(result.status, DiagStatus::Pass));
+        // len == 8, not > 4, so shows first 4 + "..."
+        assert!(result.message.contains("1234"));
+    }
+
+    #[test]
+    fn test_check_api_key_exact_9() {
+        let mut config = maix_core::Config::minimal();
+        config.api_key = "123456789".into();
+        let result = check_api_key(&config);
+        assert!(matches!(result.status, DiagStatus::Pass));
+        // len == 9, > 4, so shows first 4 + "..."
+        assert!(result.message.contains("1234"));
+        assert!(!result.message.contains("6789"));
+    }
 }

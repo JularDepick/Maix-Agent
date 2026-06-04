@@ -1,5 +1,30 @@
-//! LLM Provider abstraction layer.
-//! Key types: [`LLMProvider`] trait, [`OpenAICompatProvider`], [`ProviderRegistry`].
+//! # Maix-Provider
+//!
+//! LLM Provider abstraction layer for Maix-Agent.
+//!
+//! This crate provides a unified interface for interacting with different
+//! LLM providers:
+//!
+//! - **[`LLMProvider`] trait** — common interface for all providers
+//! - **[`AnthropicProvider`]** — Anthropic Claude API
+//! - **[`OpenAICompatProvider`]** — OpenAI-compatible APIs (OpenAI, Azure, etc.)
+//! - **[`ProviderRegistry`]** — provider registration and discovery
+//! - **[`ChatStream`]** — streaming response handling
+//! - **[`rate_limiter`]** — request rate limiting
+//! - **[`cache`]** — response caching
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────┐
+//! │  ProviderRegistry │
+//! └────────┬────────┘
+//!          │
+//!    ┌─────┴─────┐
+//!    ▼           ▼
+//! Anthropic   OpenAI
+//! Provider    Compat
+//! ```
 
 pub mod anthropic;
 pub mod cache;
@@ -18,6 +43,20 @@ pub use traits::{LLMProvider, ProviderCapabilities};
 
 use maix_core::{MaixError, Message, ToolDef, TokenUsage};
 use serde::{Deserialize, Serialize};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_http_err() {
+        let err = http_err("connection refused");
+        match err {
+            MaixError::Http(msg) => assert_eq!(msg, "connection refused"),
+            _ => panic!("expected Http error"),
+        }
+    }
+}
 
 /// Convert a reqwest error into MaixError::Http.
 pub(crate) fn http_err(e: impl std::fmt::Display) -> MaixError {

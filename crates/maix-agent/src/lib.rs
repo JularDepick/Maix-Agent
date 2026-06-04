@@ -1,8 +1,36 @@
-//! Agent core loop and state machine (Phase 1).
+//! # Maix-Agent
 //!
-//! Also provides the `Maix` facade — the central orchestrator that ties together
-//! config, providers, models, memory, tools, skills, and identities.
-//! All entry points (CLI, TUI, Gateway) drive the system through `Maix`.
+//! Core agent loop, state machine, and orchestration for Maix-Agent.
+//!
+//! This crate provides the central `Maix` facade that ties together all
+//! system components:
+//!
+//! - **Agent loop** — message processing, tool execution, streaming
+//! - **Orchestrator** ([`orchestrator`]) — high-level task coordination
+//! - **Context management** ([`context`]) — token counting, context assembly
+//! - **Compaction** ([`compaction`]) — context summarization for long sessions
+//! - **Memory** — integration with maix-memory for persistent knowledge
+//! - **Tools** ([`commands`]) — custom command discovery and execution
+//! - **Skills** — extensible skill system
+//! - **Hooks** ([`hooks`]) — event-driven customization points
+//! - **Export** ([`export`]) — conversation export (markdown, JSON)
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────┐
+//! │   CLI/TUI   │
+//! └──────┬──────┘
+//!        │
+//! ┌──────▼──────┐
+//! │  Maix Agent │ ◄── Main orchestrator
+//! └──────┬──────┘
+//!        │
+//!   ┌────┴────┐
+//!   ▼         ▼
+//! Provider  Tools
+//! (LLM)    (Registry)
+//! ```
 
 use maix_core::{MaixResult, Message, MessageContent, Role, ToolCall, TokenUsage};
 use maix_core::model_router::ModelRouter;
@@ -446,7 +474,7 @@ impl Agent {
 
         if (token_trigger || msg_trigger || tool_trigger) && self.session.messages.len() > 8 {
             let reason = if token_trigger {
-                format!("{}% context used", (current / context_window * 100.0) as u32)
+                format!("{}% context used", if context_window > 0.0 { (current / context_window * 100.0) as u32 } else { 0 })
             } else if msg_trigger {
                 format!("{} messages", self.session.messages.len())
             } else {
@@ -483,9 +511,10 @@ impl Agent {
             if msg.role == Role::Tool {
                 if let Some(text) = msg.content.text() {
                     if text.len() > 500 {
+                        let end = text.char_indices().nth(300).map(|(i, _)| i).unwrap_or(text.len());
                         let truncated = format!(
                             "{}\n... [truncated, {} chars total]",
-                            &text[..300.min(text.len())],
+                            &text[..end],
                             text.len()
                         );
                         let old_tokens = text.len() as u64 / 4;
@@ -505,7 +534,7 @@ impl Agent {
             if msg.role == Role::Tool {
                 if let Some(text) = msg.content.text() {
                     // Create a key from the tool call context
-                    let key = format!("tool:{}", text.len());
+                    let key = format!("tool:{}:{}", msg.role as u8, text.len());
                     if let Some(&prev_idx) = seen_tool_calls.get(&key) {
                         // Mark the older duplicate for removal
                         to_remove.push(prev_idx);
@@ -620,7 +649,7 @@ impl Agent {
         tracing::info!(
             "Context compacted: summarized {} old messages, kept {} recent",
             split_point,
-            self.session.messages.len() - 1,
+            self.session.messages.len().saturating_sub(1),
         );
         Ok(())
     }
@@ -914,20 +943,41 @@ impl Agent {
                         if let Some(ref tx) = tx {
                             let _ = tx.send(AgentEvent::WaitingApproval);
                         }
-                        // Wait for approval for each tool that needs it
+                        // Buffer for out-of-order approvals
+                        let mut approval_buf: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
                         for tc in &needs_approval {
-                            match rx.recv().await {
-                                Some((id, appr)) if id == tc.id => {
-                                    if let Some(ref tx) = tx {
-                                        if appr {
-                                            let _ = tx.send(AgentEvent::ToolCallApproved);
-                                            approved_ids.insert(tc.id.clone());
-                                        } else {
-                                            let _ = tx.send(AgentEvent::ToolCallDenied("denied by user".into()));
-                                        }
+                            // Check if we already received this approval
+                            if let Some(appr) = approval_buf.remove(&tc.id) {
+                                if let Some(ref tx) = tx {
+                                    if appr {
+                                        let _ = tx.send(AgentEvent::ToolCallApproved);
+                                        approved_ids.insert(tc.id.clone());
+                                    } else {
+                                        let _ = tx.send(AgentEvent::ToolCallDenied("denied by user".into()));
                                     }
                                 }
-                                _ => {}
+                            } else {
+                                // Wait for approvals, buffering mismatches
+                                loop {
+                                    match rx.recv().await {
+                                        Some((id, appr)) if id == tc.id => {
+                                            if let Some(ref tx) = tx {
+                                                if appr {
+                                                    let _ = tx.send(AgentEvent::ToolCallApproved);
+                                                    approved_ids.insert(tc.id.clone());
+                                                } else {
+                                                    let _ = tx.send(AgentEvent::ToolCallDenied("denied by user".into()));
+                                                }
+                                            }
+                                            break;
+                                        }
+                                        Some((id, appr)) => {
+                                            // Buffer out-of-order approval
+                                            approval_buf.insert(id, appr);
+                                        }
+                                        None => break,
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -1064,7 +1114,7 @@ impl Agent {
                 content: format!(
                     "User: {}\nAssistant: {}",
                     user_input,
-                    &final_text[..final_text.len().min(500)]
+                    &final_text[..final_text.char_indices().nth(500).map(|(i, _)| i).unwrap_or(final_text.len())]
                 ),
                 kind: MemoryKind::Episodic,
                 importance: 0.7,
@@ -1075,7 +1125,9 @@ impl Agent {
                     m
                 },
             };
-            let _ = self.memory.save(summary).await;
+            if let Err(e) = self.memory.save(summary).await {
+                tracing::warn!("Failed to save memory: {e}");
+            }
             if let Some(ref tx) = tx {
                 let _ = tx.send(AgentEvent::MemoryUpdated {
                     summary: "Conversation recorded".into(),

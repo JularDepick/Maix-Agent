@@ -57,3 +57,55 @@ impl SkillScheduler {
         path.starts_with(&self.workspace_root)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn test_new() {
+        let s = SkillScheduler::new(PathBuf::from("/workspace"));
+        assert_eq!(s.workspace_root(), &PathBuf::from("/workspace"));
+    }
+
+    #[test]
+    fn test_with_registry() {
+        let reg = LoaderRegistry::new();
+        let s = SkillScheduler::new(PathBuf::from("/ws")).with_registry(reg);
+        assert_eq!(s.registry().count(), 0);
+    }
+
+    #[test]
+    fn test_registry_accessor() {
+        let s = SkillScheduler::new(PathBuf::from("/ws"));
+        assert_eq!(s.registry().count(), 0);
+    }
+
+    #[test]
+    fn test_workspace_root_accessor() {
+        let s = SkillScheduler::new(PathBuf::from("/my/workspace"));
+        assert_eq!(s.workspace_root(), &PathBuf::from("/my/workspace"));
+    }
+
+    #[test]
+    fn test_check_permission_always_true() {
+        let s = SkillScheduler::new(PathBuf::from("/ws"));
+        assert!(s.check_permission("any-skill", &["read", "write"]));
+        assert!(s.check_permission("", &[]));
+    }
+
+    #[test]
+    fn test_validate_workspace_inside() {
+        let s = SkillScheduler::new(PathBuf::from("/workspace"));
+        assert!(s.validate_workspace(Path::new("/workspace/skills/my-skill")));
+        assert!(s.validate_workspace(Path::new("/workspace")));
+    }
+
+    #[test]
+    fn test_validate_workspace_outside() {
+        let s = SkillScheduler::new(PathBuf::from("/workspace"));
+        assert!(!s.validate_workspace(Path::new("/other/path")));
+        assert!(!s.validate_workspace(Path::new("/workspac")));
+    }
+}

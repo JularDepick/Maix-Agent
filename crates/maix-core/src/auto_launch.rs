@@ -154,3 +154,24 @@ fn describe_search() -> String {
     lines.push("  4. $PATH".into());
     lines.join("\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_exe_name() {
+        #[cfg(target_os = "windows")]
+        assert_eq!(exe_name("maix"), "maix.exe");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(exe_name("maix"), "maix");
+    }
+
+    #[test]
+    fn test_exe_name_custom() {
+        #[cfg(target_os = "windows")]
+        assert_eq!(exe_name("myapp"), "myapp.exe");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(exe_name("myapp"), "myapp");
+    }
+}

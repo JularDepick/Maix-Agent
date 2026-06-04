@@ -432,4 +432,89 @@ mod tests {
         assert_eq!(info.tone, "casual");
         assert_eq!(info.traits.len(), 1);
     }
+
+    #[test]
+    fn test_prost_value_null() {
+        let v = prost_types::Value { kind: Some(prost_types::value::Kind::NullValue(0)) };
+        let json = prost_value_to_json(v);
+        assert_eq!(json, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_prost_value_none_kind() {
+        let v = prost_types::Value { kind: None };
+        let json = prost_value_to_json(v);
+        assert_eq!(json, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_prost_value_bool() {
+        let v = prost_types::Value { kind: Some(prost_types::value::Kind::BoolValue(true)) };
+        assert_eq!(prost_value_to_json(v), serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn test_prost_value_string() {
+        let v = prost_types::Value { kind: Some(prost_types::value::Kind::StringValue("hello".into())) };
+        assert_eq!(prost_value_to_json(v), serde_json::Value::String("hello".into()));
+    }
+
+    #[test]
+    fn test_prost_value_number() {
+        let v = prost_types::Value { kind: Some(prost_types::value::Kind::NumberValue(42.5)) };
+        let json = prost_value_to_json(v);
+        assert_eq!(json, serde_json::json!(42.5));
+    }
+
+    #[test]
+    fn test_prost_value_list() {
+        let v = prost_types::Value {
+            kind: Some(prost_types::value::Kind::ListValue(prost_types::ListValue {
+                values: vec![
+                    prost_types::Value { kind: Some(prost_types::value::Kind::NumberValue(1.0)) },
+                    prost_types::Value { kind: Some(prost_types::value::Kind::StringValue("two".into())) },
+                ],
+            })),
+        };
+        let json = prost_value_to_json(v);
+        assert_eq!(json, serde_json::json!([1.0, "two"]));
+    }
+
+    #[test]
+    fn test_prost_struct_nested() {
+        let inner = prost_types::Struct {
+            fields: std::collections::BTreeMap::from([
+                ("key".into(), prost_types::Value { kind: Some(prost_types::value::Kind::StringValue("val".into())) }),
+            ]),
+        };
+        let outer = prost_types::Struct {
+            fields: std::collections::BTreeMap::from([
+                ("nested".into(), prost_types::Value { kind: Some(prost_types::value::Kind::StructValue(inner)) }),
+            ]),
+        };
+        let json = prost_struct_to_json(outer);
+        assert_eq!(json["nested"]["key"], "val");
+    }
+
+    #[test]
+    fn test_prost_struct_empty() {
+        let s = prost_types::Struct { fields: std::collections::BTreeMap::new() };
+        let json = prost_struct_to_json(s);
+        assert_eq!(json, serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_json_to_prost_value_null() {
+        let pv = json_to_prost_value(serde_json::Value::Null);
+        assert!(matches!(pv.kind, Some(prost_types::value::Kind::NullValue(_))));
+    }
+
+    #[test]
+    fn test_json_to_prost_value_array() {
+        let pv = json_to_prost_value(serde_json::json!([1, "two", true]));
+        match pv.kind {
+            Some(prost_types::value::Kind::ListValue(l)) => assert_eq!(l.values.len(), 3),
+            _ => panic!("expected list"),
+        }
+    }
 }

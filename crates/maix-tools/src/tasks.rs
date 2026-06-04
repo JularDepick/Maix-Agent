@@ -371,3 +371,175 @@ impl Tool for TaskOutputTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_ctx() -> ToolCtx {
+        ToolCtx {
+            session_id: "test".into(),
+            working_dir: ".".into(),
+            ask_user_tx: None,
+        }
+    }
+
+    #[test]
+    fn test_task_status_display() {
+        assert_eq!(TaskStatus::Pending.to_string(), "pending");
+        assert_eq!(TaskStatus::InProgress.to_string(), "in_progress");
+        assert_eq!(TaskStatus::Completed.to_string(), "completed");
+    }
+
+    #[tokio::test]
+    async fn test_task_create_and_get() {
+        let store = new_task_store();
+        let tool = TaskCreateTool::new(store.clone());
+        let ctx = test_ctx();
+
+        let result = tool.execute(&ctx, serde_json::json!({
+            "subject": "Test task",
+            "description": "A test description"
+        })).await.unwrap();
+
+        assert!(result.starts_with("Created task task_"));
+
+        let store = store.lock().await;
+        assert_eq!(store.len(), 1);
+        let task = store.values().next().unwrap();
+        assert_eq!(task.subject, "Test task");
+        assert_eq!(task.description, "A test description");
+        assert_eq!(task.status, TaskStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn test_task_create_empty_subject() {
+        let store = new_task_store();
+        let tool = TaskCreateTool::new(store);
+        let ctx = test_ctx();
+
+        let result = tool.execute(&ctx, serde_json::json!({
+            "subject": "",
+            "description": "desc"
+        })).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_task_update_status() {
+        let store = new_task_store();
+        let create = TaskCreateTool::new(store.clone());
+        let ctx = test_ctx();
+        create.execute(&ctx, serde_json::json!({
+            "subject": "Task",
+            "description": "desc"
+        })).await.unwrap();
+
+        let task_id = store.lock().await.keys().next().cloned().unwrap();
+
+        let update = TaskUpdateTool::new(store.clone());
+        update.execute(&ctx, serde_json::json!({
+            "task_id": task_id,
+            "status": "in_progress"
+        })).await.unwrap();
+
+        let store = store.lock().await;
+        assert_eq!(store[&task_id].status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    async fn test_task_update_not_found() {
+        let store = new_task_store();
+        let update = TaskUpdateTool::new(store);
+        let ctx = test_ctx();
+
+        let result = update.execute(&ctx, serde_json::json!({
+            "task_id": "nonexistent"
+        })).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_task_list_empty() {
+        let store = new_task_store();
+        let tool = TaskListTool::new(store);
+        let ctx = test_ctx();
+
+        let result = tool.execute(&ctx, serde_json::json!({})).await.unwrap();
+        assert_eq!(result, "No tasks.");
+    }
+
+    #[tokio::test]
+    async fn test_task_list_with_filter() {
+        let store = new_task_store();
+        let create = TaskCreateTool::new(store.clone());
+        let ctx = test_ctx();
+        create.execute(&ctx, serde_json::json!({"subject": "A", "description": ""})).await.unwrap();
+        create.execute(&ctx, serde_json::json!({"subject": "B", "description": ""})).await.unwrap();
+
+        let task_id = store.lock().await.keys().next().cloned().unwrap();
+        let update = TaskUpdateTool::new(store.clone());
+        update.execute(&ctx, serde_json::json!({"task_id": task_id, "status": "completed"})).await.unwrap();
+
+        let list = TaskListTool::new(store.clone());
+        let completed = list.execute(&ctx, serde_json::json!({"status": "completed"})).await.unwrap();
+        assert!(completed.contains("A") || completed.contains("B"));
+        let pending = list.execute(&ctx, serde_json::json!({"status": "pending"})).await.unwrap();
+        assert!(pending.contains("A") || pending.contains("B"));
+    }
+
+    #[tokio::test]
+    async fn test_task_get() {
+        let store = new_task_store();
+        let create = TaskCreateTool::new(store.clone());
+        let ctx = test_ctx();
+        create.execute(&ctx, serde_json::json!({"subject": "Get me", "description": "details"})).await.unwrap();
+
+        let task_id = store.lock().await.keys().next().cloned().unwrap();
+        let get = TaskGetTool::new(store);
+        let result = get.execute(&ctx, serde_json::json!({"task_id": task_id})).await.unwrap();
+        assert!(result.contains("Get me"));
+        assert!(result.contains("details"));
+    }
+
+    #[tokio::test]
+    async fn test_task_get_not_found() {
+        let store = new_task_store();
+        let get = TaskGetTool::new(store);
+        let ctx = test_ctx();
+        let result = get.execute(&ctx, serde_json::json!({"task_id": "nope"})).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_task_stop() {
+        let store = new_task_store();
+        let create = TaskCreateTool::new(store.clone());
+        let ctx = test_ctx();
+        create.execute(&ctx, serde_json::json!({"subject": "S", "description": ""})).await.unwrap();
+
+        let task_id = store.lock().await.keys().next().cloned().unwrap();
+        let update = TaskUpdateTool::new(store.clone());
+        update.execute(&ctx, serde_json::json!({"task_id": task_id, "status": "in_progress"})).await.unwrap();
+
+        let stop = TaskStopTool::new(store.clone());
+        stop.execute(&ctx, serde_json::json!({"task_id": task_id})).await.unwrap();
+
+        assert_eq!(store.lock().await[&task_id].status, TaskStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn test_task_output_empty() {
+        let store = new_task_store();
+        let create = TaskCreateTool::new(store.clone());
+        let ctx = test_ctx();
+        create.execute(&ctx, serde_json::json!({"subject": "T", "description": ""})).await.unwrap();
+
+        let task_id = store.lock().await.keys().next().cloned().unwrap();
+        let output = TaskOutputTool::new(store);
+        let result = output.execute(&ctx, serde_json::json!({"task_id": task_id})).await.unwrap();
+        assert!(result.contains("no output yet"));
+    }
+}

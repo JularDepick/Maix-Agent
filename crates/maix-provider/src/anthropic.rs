@@ -612,3 +612,246 @@ impl ChatStream {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_messages_url() {
+        let provider = AnthropicProvider::new("key".into(), "model".into());
+        assert_eq!(provider.messages_url(), "https://api.anthropic.com/v1/messages");
+    }
+
+    #[test]
+    fn test_messages_url_custom_base() {
+        let provider = AnthropicProvider::new("key".into(), "model".into())
+            .with_base_url("https://custom.api.com");
+        assert_eq!(provider.messages_url(), "https://custom.api.com/v1/messages");
+    }
+
+    #[test]
+    fn test_parse_stream_event_empty_line() {
+        assert!(parse_stream_event("").is_none());
+        assert!(parse_stream_event("   ").is_none());
+    }
+
+    #[test]
+    fn test_parse_stream_event_event_line() {
+        assert!(parse_stream_event("event: content_block_delta").is_none());
+    }
+
+    #[test]
+    fn test_parse_stream_event_content_delta() {
+        let line = r#"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#;
+        let result = parse_stream_event(line).unwrap().unwrap();
+        match result {
+            AnthropicStreamEvent::ContentBlockDelta { index, .. } => assert_eq!(index, 0),
+            _ => panic!("expected ContentBlockDelta"),
+        }
+    }
+
+    #[test]
+    fn test_parse_stream_event_message_stop() {
+        let line = r#"data: {"type":"message_stop"}"#;
+        let result = parse_stream_event(line).unwrap().unwrap();
+        assert!(matches!(result, AnthropicStreamEvent::MessageStop));
+    }
+
+    #[test]
+    fn test_parse_stream_event_ping() {
+        let line = r#"data: {"type":"ping"}"#;
+        let result = parse_stream_event(line).unwrap().unwrap();
+        assert!(matches!(result, AnthropicStreamEvent::Ping));
+    }
+
+    #[test]
+    fn test_parse_stream_event_invalid_json() {
+        let line = "data: {not valid json}";
+        let result = parse_stream_event(line).unwrap();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_stream_event_no_data_prefix() {
+        assert!(parse_stream_event("some random text").is_none());
+    }
+
+    #[test]
+    fn test_convert_messages_system() {
+        let provider = AnthropicProvider::new("key".into(), "model".into());
+        let messages = vec![
+            Message {
+                role: Role::System,
+                content: maix_core::MessageContent::Text("You are helpful.".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+            },
+            Message {
+                role: Role::User,
+                content: maix_core::MessageContent::Text("Hello".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+                reasoning_content: None,
+            },
+        ];
+        let (system, anth_msgs) = provider.convert_messages(&messages);
+        assert_eq!(system, "You are helpful.");
+        assert_eq!(anth_msgs.len(), 1);
+        assert_eq!(anth_msgs[0]["role"], "user");
+    }
+
+    #[test]
+    fn test_convert_messages_multiple_system() {
+        let provider = AnthropicProvider::new("key".into(), "model".into());
+        let messages = vec![
+            Message {
+                role: Role::System,
+                content: maix_core::MessageContent::Text("Part 1".into()),
+                name: None, tool_call_id: None, tool_calls: None, reasoning_content: None,
+            },
+            Message {
+                role: Role::System,
+                content: maix_core::MessageContent::Text("Part 2".into()),
+                name: None, tool_call_id: None, tool_calls: None, reasoning_content: None,
+            },
+        ];
+        let (system, _) = provider.convert_messages(&messages);
+        assert_eq!(system, "Part 1\nPart 2");
+    }
+
+    #[test]
+    fn test_convert_messages_assistant_with_tool_calls() {
+        let provider = AnthropicProvider::new("key".into(), "model".into());
+        let messages = vec![
+            Message {
+                role: Role::Assistant,
+                content: maix_core::MessageContent::Text("Let me check.".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Some(vec![maix_core::ToolCall {
+                    id: "call-1".into(),
+                    call_type: "function".into(),
+                    function: maix_core::FunctionCall {
+                        name: "read_file".into(),
+                        arguments: r#"{"path":"/tmp"}"#.into(),
+                    },
+                }]),
+                reasoning_content: None,
+            },
+        ];
+        let (_, anth_msgs) = provider.convert_messages(&messages);
+        assert_eq!(anth_msgs.len(), 1);
+        let blocks = anth_msgs[0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2); // text + tool_use
+        assert_eq!(blocks[0]["type"], "text");
+        assert_eq!(blocks[1]["type"], "tool_use");
+        assert_eq!(blocks[1]["id"], "call-1");
+        assert_eq!(blocks[1]["name"], "read_file");
+    }
+
+    #[test]
+    fn test_convert_messages_tool_result() {
+        let provider = AnthropicProvider::new("key".into(), "model".into());
+        let messages = vec![
+            Message {
+                role: Role::User,
+                content: maix_core::MessageContent::Text("file contents here".into()),
+                name: None,
+                tool_call_id: Some("call-1".into()),
+                tool_calls: None,
+                reasoning_content: None,
+            },
+        ];
+        let (_, anth_msgs) = provider.convert_messages(&messages);
+        assert_eq!(anth_msgs.len(), 1);
+        assert_eq!(anth_msgs[0]["role"], "user");
+        let blocks = anth_msgs[0]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"], "tool_result");
+        assert_eq!(blocks[0]["tool_use_id"], "call-1");
+    }
+
+    #[test]
+    fn test_convert_messages_empty() {
+        let provider = AnthropicProvider::new("key".into(), "model".into());
+        let (system, anth_msgs) = provider.convert_messages(&[]);
+        assert!(system.is_empty());
+        assert!(anth_msgs.is_empty());
+    }
+
+    #[test]
+    fn test_convert_tools() {
+        let provider = AnthropicProvider::new("key".into(), "model".into());
+        let tools = vec![maix_core::ToolDef::new(
+            "read_file",
+            "Read a file",
+            serde_json::json!({"type": "object", "properties": {}}),
+        )];
+        let result = provider.convert_tools(&tools);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["name"], "read_file");
+        assert_eq!(result[0]["description"], "Read a file");
+    }
+
+    #[test]
+    fn test_build_body_basic() {
+        let provider = AnthropicProvider::new("key".into(), "claude-sonnet-4-20250514".into());
+        let req = ChatRequest {
+            messages: vec![Message {
+                role: Role::User,
+                content: maix_core::MessageContent::Text("Hi".into()),
+                name: None, tool_call_id: None, tool_calls: None, reasoning_content: None,
+            }],
+            tools: None,
+            tool_choice: None,
+            temperature: Some(0.7),
+            max_tokens: Some(1024),
+            model_override: None,
+        };
+        let body = provider.build_body(&req, false);
+        assert_eq!(body["model"], "claude-sonnet-4-20250514");
+        assert_eq!(body["max_tokens"], 1024);
+        assert_eq!(body["stream"], false);
+        // f32 precision: 0.7f32 ≈ 0.699999988079071
+        assert!((body["temperature"].as_f64().unwrap() - 0.7).abs() < 0.01);
+        assert!(body["system"].is_null()); // no system message
+    }
+
+    #[test]
+    fn test_build_body_with_system() {
+        let provider = AnthropicProvider::new("key".into(), "model".into());
+        let req = ChatRequest {
+            messages: vec![
+                Message {
+                    role: Role::System,
+                    content: maix_core::MessageContent::Text("Be helpful".into()),
+                    name: None, tool_call_id: None, tool_calls: None, reasoning_content: None,
+                },
+                Message {
+                    role: Role::User,
+                    content: maix_core::MessageContent::Text("Hi".into()),
+                    name: None, tool_call_id: None, tool_calls: None, reasoning_content: None,
+                },
+            ],
+            tools: None,
+            tool_choice: None,
+            temperature: None,
+            max_tokens: None,
+            model_override: None,
+        };
+        let body = provider.build_body(&req, true);
+        assert_eq!(body["system"], "Be helpful");
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["max_tokens"], 8192); // default
+    }
+
+    #[test]
+    fn test_with_context_window() {
+        let provider = AnthropicProvider::new("key".into(), "model".into())
+            .with_context_window(100_000);
+        assert_eq!(provider.context_window(), 100_000);
+    }
+}

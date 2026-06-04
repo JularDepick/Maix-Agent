@@ -282,28 +282,28 @@ impl SessionManager {
     pub fn create_session(&self, name: &str, host_id: &str, host_name: &str) -> String {
         let id = format!("collab-{}", uuid_count());
         let session = CollaborationSession::new(&id, name, host_id, host_name);
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().unwrap_or_else(|e| e.into_inner());
         sessions.insert(id.clone(), Arc::new(RwLock::new(session)));
         id
     }
 
     pub fn get_session(&self, id: &str) -> Option<Arc<RwLock<CollaborationSession>>> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().unwrap_or_else(|e| e.into_inner());
         sessions.get(id).cloned()
     }
 
     pub fn remove_session(&self, id: &str) -> bool {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().unwrap_or_else(|e| e.into_inner());
         sessions.remove(id).is_some()
     }
 
     pub fn list_sessions(&self) -> Vec<String> {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().unwrap_or_else(|e| e.into_inner());
         sessions.keys().cloned().collect()
     }
 
     pub fn session_count(&self) -> usize {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().unwrap_or_else(|e| e.into_inner());
         sessions.len()
     }
 }
@@ -425,7 +425,7 @@ mod tests {
         assert_eq!(mgr.session_count(), 1);
 
         let session = mgr.get_session(&id).unwrap();
-        let s = session.read().unwrap();
+        let s = session.read().unwrap_or_else(|e| e.into_inner());
         assert_eq!(s.name, "Test Session");
         drop(s);
 

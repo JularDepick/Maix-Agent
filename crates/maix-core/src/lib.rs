@@ -1,4 +1,30 @@
-//! Shared types, error, and configuration for Maix-Agent.
+//! # Maix-Core
+//!
+//! Core types, error handling, and configuration for the Maix-Agent system.
+//!
+//! This crate provides the foundational types and utilities used across all
+//! Maix-Agent components:
+//!
+//! - **Error types** ([`error::MaixError`]) — unified error handling
+//! - **Configuration** ([`config`]) — TOML-based configuration with validation
+//! - **Client** ([`client::MaixClient`]) — gRPC client for server communication
+//! - **Types** ([`types`]) — shared data structures (TokenUsage, CostTracker, etc.)
+//! - **Credentials** ([`credentials`]) — API key management (env vars + file)
+//! - **Health** ([`health`]) — system health checks and diagnostics
+//! - **Logging** ([`logging`]) — debug logging configuration
+//!
+//! ## Quick Start
+//!
+//! ```rust,no_run
+//! use maix_core::client::MaixClient;
+//! use maix_core::config::Config;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let config = Config::load()?;
+//! let client = MaixClient::connect("http://127.0.0.1:9527").await?;
+//! # Ok(())
+//! # }
+//! ```
 
 pub mod architecture;
 pub mod auto_launch;

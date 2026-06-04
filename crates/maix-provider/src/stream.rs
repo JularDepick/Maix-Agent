@@ -1,5 +1,5 @@
 use super::ChatChunk;
-use futures_core::Stream;
+use futures::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc;
@@ -81,6 +81,14 @@ impl ChatStream {
     }
 }
 
+impl Stream for ChatStream {
+    type Item = Result<ChatChunk, maix_core::MaixError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.receiver.poll_recv(cx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -118,13 +126,5 @@ mod tests {
         let usage = chunk.usage.unwrap();
         assert_eq!(usage.prompt_tokens, 10);
         assert_eq!(usage.total_tokens, 30);
-    }
-}
-
-impl Stream for ChatStream {
-    type Item = Result<ChatChunk, maix_core::MaixError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(cx)
     }
 }

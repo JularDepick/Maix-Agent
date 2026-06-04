@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Stream renderer — real-time token display with abort support.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -6,6 +5,7 @@ use std::sync::Arc;
 
 /// Events emitted during streaming.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum RenderEvent {
     Token(String),
     Done,
@@ -19,6 +19,7 @@ pub struct StreamRenderer {
     aborted: Arc<AtomicBool>,
 }
 
+#[allow(dead_code)]
 impl StreamRenderer {
     pub fn new() -> (Self, Arc<AtomicBool>) {
         let aborted = Arc::new(AtomicBool::new(false));
@@ -133,7 +134,7 @@ mod tests {
 
     #[test]
     fn test_process_tokens_aborted() {
-        let (renderer, aborted) = StreamRenderer::new();
+        let (renderer, _aborted) = StreamRenderer::new();
         let mut renderer = renderer;
         renderer.abort();
         let tokens = vec!["Hello".into(), "World".into()];
