@@ -21,27 +21,40 @@ pub async fn cmd_memory(client: &MaixClient, action: MemoryAction) {
                     }
                 }
             }
-            Err(e) => eprintln!("Error: {e}"),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         },
         MemoryAction::Search { query } => {
             let q = query.join(" ");
             match client.search_memory(&q, 10).await {
                 Ok(entries) => {
-                    for e in &entries {
-                        println!(
-                            "[{}] kind={}: {}",
-                            &e.id[..e.id.len().min(8)],
-                            e.kind,
-                            truncate_str(&e.content, 120)
-                        );
+                    if entries.is_empty() {
+                        println!("(no results for \"{q}\")");
+                    } else {
+                        for e in &entries {
+                            println!(
+                                "[{}] kind={}: {}",
+                                &e.id[..e.id.len().min(8)],
+                                e.kind,
+                                truncate_str(&e.content, 120)
+                            );
+                        }
                     }
                 }
-                Err(e) => eprintln!("Error: {e}"),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
             }
         }
         MemoryAction::Forget { id } => match client.forget_memory(&id).await {
             Ok(_) => println!("Forgot: {id}"),
-            Err(e) => eprintln!("Error: {e}"),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         },
     }
 }

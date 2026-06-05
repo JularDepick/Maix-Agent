@@ -48,8 +48,15 @@ impl SkillScheduler {
     }
 
     /// Check if a skill has the required permissions.
-    pub fn check_permission(&self, _skill_name: &str, _required: &[&str]) -> bool {
-        true
+    pub fn check_permission(&self, skill_name: &str, required: &[&str]) -> bool {
+        if required.is_empty() {
+            return true;
+        }
+        tracing::warn!(
+            "permission check not yet implemented for skill '{}' (required: {:?}), denying by default",
+            skill_name, required
+        );
+        false
     }
 
     /// Validate working directory is within sandbox.
@@ -89,10 +96,17 @@ mod tests {
     }
 
     #[test]
-    fn test_check_permission_always_true() {
+    fn test_check_permission_empty_requirements() {
         let s = SkillScheduler::new(PathBuf::from("/ws"));
-        assert!(s.check_permission("any-skill", &["read", "write"]));
+        // No required permissions means always allowed
         assert!(s.check_permission("", &[]));
+    }
+
+    #[test]
+    fn test_check_permission_denied_by_default() {
+        let s = SkillScheduler::new(PathBuf::from("/ws"));
+        // Non-empty requirements are denied by default (not yet implemented)
+        assert!(!s.check_permission("any-skill", &["read", "write"]));
     }
 
     #[test]

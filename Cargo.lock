@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "maix-agent"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1481,7 +1481,7 @@ dependencies = [
 
 [[package]]
 name = "maix-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "atty",
  "clap",
@@ -1504,7 +1504,7 @@ dependencies = [
 
 [[package]]
 name = "maix-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "figment",
@@ -1526,7 +1526,7 @@ dependencies = [
 
 [[package]]
 name = "maix-db"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "rusqlite",
@@ -1537,7 +1537,7 @@ dependencies = [
 
 [[package]]
 name = "maix-gateway"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1545,10 +1545,12 @@ dependencies = [
  "chrono",
  "clap",
  "futures",
+ "hmac",
  "maix-core",
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -1560,7 +1562,7 @@ dependencies = [
 
 [[package]]
 name = "maix-memory"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1578,7 +1580,7 @@ dependencies = [
 
 [[package]]
 name = "maix-monitor"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "maix-core",
@@ -1590,7 +1592,7 @@ dependencies = [
 
 [[package]]
 name = "maix-provider"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "futures",
@@ -1604,7 +1606,7 @@ dependencies = [
 
 [[package]]
 name = "maix-server"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "clap",
@@ -1633,7 +1635,7 @@ dependencies = [
 
 [[package]]
 name = "maix-skills"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "libc",
@@ -1649,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "maix-task-queue"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "maix-core",
  "maix-db",
@@ -1661,7 +1663,7 @@ dependencies = [
 
 [[package]]
 name = "maix-tools"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "base64",
@@ -1685,7 +1687,7 @@ dependencies = [
 
 [[package]]
 name = "maix-tui"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "clap",
@@ -2454,6 +2456,17 @@ name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
+]
+
+[[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
  "cpufeatures",

@@ -116,10 +116,12 @@ pub struct AskArgs {
 
     /// Model to use (default from config)
     #[arg(short, long)]
+    #[allow(dead_code)] // TODO: pass model to daemon request
     pub model: Option<String>,
 
     /// Working directory
     #[arg(short, long)]
+    #[allow(dead_code)] // TODO: pass workdir to daemon request
     pub workdir: Option<PathBuf>,
 
     /// Agent mode: agent, plan, yolo
@@ -140,14 +142,17 @@ pub struct AskArgs {
 
     /// Maximum agent tool-calling rounds
     #[arg(long)]
+    #[allow(dead_code)] // TODO: pass max_turns to daemon request
     pub max_turns: Option<usize>,
 
     /// Print mode: non-interactive, output and exit (same as -p)
     #[arg(short = 'p', long)]
+    #[allow(dead_code)] // TODO: implement print mode (non-interactive)
     pub print: bool,
 
     /// Continue a previous session
     #[arg(short, long)]
+    #[allow(dead_code)] // TODO: implement session continuation
     pub r#continue: bool,
 }
 
@@ -212,6 +217,11 @@ pub enum SkillAction {
     },
     /// Disable a skill
     Disable {
+        /// Skill name
+        name: String,
+    },
+    /// Uninstall a skill
+    Uninstall {
         /// Skill name
         name: String,
     },

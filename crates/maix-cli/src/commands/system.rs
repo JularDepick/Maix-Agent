@@ -13,7 +13,10 @@ pub async fn cmd_health(client: &MaixClient) {
             println!("Sessions: {}", h.active_sessions);
             println!("Queue:    {}", h.queue_depth);
         }
-        Err(e) => eprintln!("Error: {e}"),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -124,12 +127,7 @@ pub async fn cmd_update(check_only: bool) {
             println!("\nNew version available: v{} -> v{}", info.current, info.latest);
             if !info.release_notes.is_empty() {
                 println!("\nRelease notes:");
-                let notes = if info.release_notes.len() > 500 {
-                    let end = info.release_notes.char_indices().nth(500).map(|(i, _)| i).unwrap_or(info.release_notes.len());
-                    format!("{}...", &info.release_notes[..end])
-                } else {
-                    info.release_notes.clone()
-                };
+                let notes = truncate_notes(&info.release_notes, 500);
                 println!("{}", notes);
             }
             println!("\nDownload: {}", info.download_url);

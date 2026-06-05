@@ -95,6 +95,7 @@ impl App {
                                     self.search_mode = true;
                                     self.search_query.clear();
                                     self.search_results.clear();
+                                    self.search_result_index = 0;
                                 }
                                 (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
                                     // Command palette
@@ -114,25 +115,20 @@ impl App {
                                 (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
                                     self.messages.clear();
                                     self.messages.push(ChatMessage::System("已清屏".into()));
+                                    self.mark_dirty(DirtyRegion::Chat);
                                 }
                                 (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
                                     // New session
                                     self.handle_slash_command("/session new").await;
                                 }
                                 (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-                                    self.input.buffer.clear();
-                                    self.input.cursor = 0;
+                                    self.input.clear_to_line_start();
                                 }
                                 (KeyCode::Char('w'), KeyModifiers::CONTROL) => {
-                                    // Delete previous word
-                                    let before = self.input.buffer[..self.input.cursor].to_string();
-                                    let trimmed = before.trim_end();
-                                    let last_space = trimmed.rfind(' ').map(|i| i + 1).unwrap_or(0);
-                                    self.input.buffer.drain(last_space..self.input.cursor);
-                                    self.input.cursor = last_space;
+                                    self.input.delete_prev_word();
                                 }
                                 (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
-                                    self.input.buffer.truncate(self.input.cursor);
+                                    self.input.clear_to_line_end();
                                 }
                                 (KeyCode::F(1), _) => {
                                     self.handle_slash_command("/help").await;
@@ -154,7 +150,7 @@ impl App {
                                     self.fullscreen = !self.fullscreen;
                                 }
                                 (KeyCode::Esc, _) => {
-                                    if self.is_streaming.load(Ordering::Relaxed) {
+                                    if self.is_streaming.load(Ordering::SeqCst) {
                                         // Cancel streaming
                                         self.is_streaming.store(false, Ordering::SeqCst);
                                         self.agent_state = Some("Idle".into());
@@ -169,6 +165,7 @@ impl App {
                                 }
                                 (KeyCode::PageUp, _) => {
                                     self.chat_scroll = self.chat_scroll.saturating_add(10);
+                                    self.auto_scroll = false;
                                 }
                                 (KeyCode::PageDown, _) => {
                                     self.chat_scroll = self.chat_scroll.saturating_sub(10).min(self.messages.len());
@@ -178,6 +175,7 @@ impl App {
                                 }
                                 (KeyCode::End, KeyModifiers::CONTROL) => {
                                     self.chat_scroll = 0;
+                                    self.auto_scroll = true;
                                 }
                                 _ => {
                                     // Pass to input handling
@@ -217,7 +215,7 @@ impl App {
                     }
 
                     // Auto-save periodically
-                    if self.tick_count.is_multiple_of(600) {
+                    if self.tick_count % 600 == 0 {
                         // Auto-save every 30 seconds (600 * 50ms)
                         let save_dir = dirs_home().join(".maix").join("autosave");
                         let _ = std::fs::create_dir_all(&save_dir);
@@ -326,7 +324,6 @@ impl App {
                                             cache_write_tokens: u.cache_write_tokens,
                                         }
                                     } else {
-                                        streaming_flag.store(false, Ordering::SeqCst);
                                         break;
                                     }
                                 }
@@ -363,8 +360,8 @@ impl App {
                 } else {
                     self.messages.push(ChatMessage::Assistant(text));
                 }
-                if self.messages.len().is_multiple_of(100) {
-                    self.trim_messages();
+                if self.messages.len() % 100 == 0 {
+                    self.truncate_messages();
                 }
             }
             AppEvent::ReasoningDelta(text) => {
@@ -475,7 +472,7 @@ impl App {
                 if e.contains("connection") || e.contains("timeout") {
                     error_lines.push(String::new());
                     error_lines.push("📍 上下文:".to_string());
-                    error_lines.push(format!("  会话: {}", &self.session_id[..8.min(self.session_id.len())]));
+                    error_lines.push(format!("  会话: {}", self.session_id.chars().take(8).collect::<String>()));
                     error_lines.push(format!("  模型: {}", self.model_name));
                     error_lines.push(format!("  服务: {}", self.server_addr));
                 }

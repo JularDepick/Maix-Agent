@@ -28,9 +28,20 @@ impl PlatformBridge for TelegramBridge {
         "telegram"
     }
 
-    fn verify_signature(&self, _headers: &[(String, String)], _body: &[u8]) -> bool {
-        // Telegram uses webhook secret in URL, not signature headers
-        true
+    fn verify_signature(&self, headers: &[(String, String)], _body: &[u8]) -> bool {
+        // Telegram sends the secret_token in the X-Telegram-Bot-Api-Secret-Token header.
+        // Validate it matches the configured bot_token (used as secret_token).
+        let secret = headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("x-telegram-bot-api-secret-token"))
+            .map(|(_, v)| v.as_str());
+
+        match secret {
+            Some(token) => !token.is_empty() && token == self.bot_token,
+            // If no secret-token header is present, allow the request through
+            // (legacy webhooks or setups that don't configure secret_token).
+            None => true,
+        }
     }
 
     fn parse_webhook(&self, body: &str) -> Result<IncomingMessage, String> {
@@ -112,7 +123,7 @@ impl PlatformBridge for TelegramBridge {
 
     fn format_response(&self, msg: &OutgoingMessage) -> String {
         match msg.format {
-            MessageFormat::Markdown => format!("<b>{}</b>", msg.text),
+            MessageFormat::Markdown => format!("*{}*", msg.text),
             MessageFormat::Html => msg.text.clone(),
             MessageFormat::Plain => msg.text.clone(),
         }
@@ -216,7 +227,7 @@ mod tests {
             reply_to: None,
             format: MessageFormat::Markdown,
         };
-        assert_eq!(bridge.format_response(&msg), "<b>Hello</b>");
+        assert_eq!(bridge.format_response(&msg), "*Hello*");
     }
 
     #[test]
@@ -232,9 +243,37 @@ mod tests {
     }
 
     #[test]
-    fn test_telegram_verify_signature_always_true() {
+    fn test_telegram_verify_signature_no_header() {
         let bridge = TelegramBridge::new("token");
+        // No secret-token header: allowed through (legacy webhook)
         assert!(bridge.verify_signature(&[], b"body"));
+    }
+
+    #[test]
+    fn test_telegram_verify_signature_valid() {
+        let bridge = TelegramBridge::new("my-bot-token");
+        let headers = vec![
+            ("X-Telegram-Bot-Api-Secret-Token".to_string(), "my-bot-token".to_string()),
+        ];
+        assert!(bridge.verify_signature(&headers, b"body"));
+    }
+
+    #[test]
+    fn test_telegram_verify_signature_mismatch() {
+        let bridge = TelegramBridge::new("my-bot-token");
+        let headers = vec![
+            ("X-Telegram-Bot-Api-Secret-Token".to_string(), "wrong-token".to_string()),
+        ];
+        assert!(!bridge.verify_signature(&headers, b"body"));
+    }
+
+    #[test]
+    fn test_telegram_verify_signature_empty_token() {
+        let bridge = TelegramBridge::new("my-bot-token");
+        let headers = vec![
+            ("X-Telegram-Bot-Api-Secret-Token".to_string(), "".to_string()),
+        ];
+        assert!(!bridge.verify_signature(&headers, b"body"));
     }
 
     #[test]

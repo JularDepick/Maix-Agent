@@ -195,6 +195,10 @@ impl PluginManager {
             .find(|p| p.manifest.name == name)
             .ok_or_else(|| format!("plugin '{}' not found", name))?;
 
+        if plugin.state == PluginState::Enabled {
+            return Err(format!("plugin '{}' is enabled; disable it before unloading", name));
+        }
+
         plugin.state = PluginState::Discovered;
         Ok(())
     }

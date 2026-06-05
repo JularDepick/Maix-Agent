@@ -41,6 +41,7 @@ pub struct VimState {
     pub enabled: bool,
     pending_d: bool,
     pending_y: bool,
+    pending_r: bool,
     register: String,
     /// Visual mode selection start (byte offset).
     selection_start: Option<usize>,
@@ -53,6 +54,7 @@ impl VimState {
             enabled: false,
             pending_d: false,
             pending_y: false,
+            pending_r: false,
             register: String::new(),
             selection_start: None,
         }
@@ -76,6 +78,10 @@ impl VimState {
         } else {
             self.mode = VimMode::Insert;
         }
+        self.pending_d = false;
+        self.pending_y = false;
+        self.pending_r = false;
+        self.selection_start = None;
     }
 
     /// Process a key event. Returns the action to take.
@@ -89,10 +95,14 @@ impl VimState {
             return VimAction::Passthrough;
         }
 
-        // Ctrl+C always resets to insert mode
+        // Ctrl+C always resets to insert mode and clears pending state
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.mode = VimMode::Insert;
-            return VimAction::Passthrough;
+            self.pending_d = false;
+            self.pending_y = false;
+            self.pending_r = false;
+            self.selection_start = None;
+            return VimAction::None;
         }
 
         match self.mode {
@@ -118,13 +128,16 @@ impl VimState {
             self.pending_d = false;
             match key.code {
                 KeyCode::Char('d') => {
-                    // dd — delete entire line
+                    // dd — delete current line (or all text in single-line)
                     self.register = text.clone();
                     text.clear();
                     *cursor = 0;
                     return VimAction::None;
                 }
-                _ => return VimAction::None,
+                _ => {
+                    // Unknown key after 'd' — reset and re-process through normal match
+                    return self.handle_normal(key, cursor, text);
+                }
             }
         }
         if self.pending_y {
@@ -135,8 +148,24 @@ impl VimState {
                     self.register = text.clone();
                     return VimAction::None;
                 }
-                _ => return VimAction::None,
+                _ => {
+                    // Unknown key after 'y' — reset and re-process through normal match
+                    return self.handle_normal(key, cursor, text);
+                }
             }
+        }
+        if self.pending_r {
+            self.pending_r = false;
+            // Replace character under cursor with the typed character
+            if let KeyCode::Char(c) = key.code {
+                if *cursor < text.len() {
+                    let ch_len = text[*cursor..].chars().next().map_or(0, |c| c.len_utf8());
+                    text.drain(*cursor..*cursor + ch_len);
+                    text.insert(*cursor, c);
+                    // Don't advance cursor (Vim behavior)
+                }
+            }
+            return VimAction::None;
         }
 
         match key.code {
@@ -240,7 +269,8 @@ impl VimState {
                 VimAction::SelectionChanged
             }
             KeyCode::Char('r') => {
-                // Replace next char — need another key, skip for now
+                // Enter replace-pending state
+                self.pending_r = true;
                 VimAction::None
             }
 
@@ -284,9 +314,10 @@ impl VimState {
                 VimAction::SelectionChanged
             }
             KeyCode::Char('y') => {
-                // Yank selection
+                // Yank selection (inclusive of cursor position)
                 let selected = if let Some((start, end)) = self.selection(*cursor) {
-                    text[start..end].to_string()
+                    let inclusive_end = end + text[end..].chars().next().map_or(0, |c| c.len_utf8());
+                    text[start..inclusive_end].to_string()
                 } else {
                     String::new()
                 };
@@ -296,10 +327,11 @@ impl VimState {
                 VimAction::Yank(selected)
             }
             KeyCode::Char('d') | KeyCode::Char('x') => {
-                // Delete selection
+                // Delete selection (inclusive of cursor position)
                 if let Some((start, end)) = self.selection(*cursor) {
-                    self.register = text[start..end].to_string();
-                    text.drain(start..end);
+                    let inclusive_end = end + text[end..].chars().next().map_or(0, |c| c.len_utf8());
+                    self.register = text[start..inclusive_end].to_string();
+                    text.drain(start..inclusive_end);
                     *cursor = start;
                 }
                 self.mode = VimMode::Normal;

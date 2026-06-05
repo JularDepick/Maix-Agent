@@ -133,7 +133,7 @@ impl PaneLayout {
             return;
         }
         match self.split {
-            SplitDirection::Vertical => {
+            SplitDirection::Horizontal => {
                 if n == 2 {
                     let first_width = (total_width as f32 * self.split_ratio) as u16;
                     let second_width = total_width - first_width;
@@ -149,7 +149,7 @@ impl PaneLayout {
                     }
                 }
             }
-            SplitDirection::Horizontal => {
+            SplitDirection::Vertical => {
                 if n == 2 {
                     let first_height = (total_height as f32 * self.split_ratio) as u16;
                     let second_height = total_height - first_height;
@@ -241,18 +241,18 @@ mod tests {
     }
 
     #[test]
-    fn test_recalculate_vertical() {
+    fn test_recalculate_horizontal() {
         let mut layout = PaneLayout::single(PaneContent::Chat);
-        layout.split(SplitDirection::Vertical, PaneContent::FileTree);
+        layout.split(SplitDirection::Horizontal, PaneContent::FileTree);
         layout.recalculate_areas(100, 40);
         assert_eq!(layout.panes[0].width, 50);
         assert_eq!(layout.panes[0].height, 40);
     }
 
     #[test]
-    fn test_recalculate_horizontal() {
+    fn test_recalculate_vertical() {
         let mut layout = PaneLayout::single(PaneContent::Chat);
-        layout.split(SplitDirection::Horizontal, PaneContent::FileTree);
+        layout.split(SplitDirection::Vertical, PaneContent::FileTree);
         layout.recalculate_areas(100, 40);
         assert_eq!(layout.panes[0].width, 100);
         assert_eq!(layout.panes[0].height, 20);

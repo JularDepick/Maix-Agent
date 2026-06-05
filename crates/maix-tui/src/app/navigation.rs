@@ -4,20 +4,13 @@ use super::*;
 
 impl App {
     pub async fn handle_key_event(&mut self, key: KeyEvent) {
-        // Vim mode
-        if self.vim.enabled && self.input.buffer.is_empty() {
+        // Vim mode — intercept keys in Normal/Visual mode regardless of buffer state
+        if self.vim.enabled && self.vim.mode != crate::vim::VimMode::Insert {
             match self.vim.handle_key(key, &mut self.input.cursor, &mut self.input.buffer) {
                 crate::vim::VimAction::Passthrough => {}
                 crate::vim::VimAction::None => return,
                 crate::vim::VimAction::Submit => {
-                    let text = self.input.buffer.trim().to_string();
-                    if !text.is_empty() {
-                        self.input.history.push(text.clone());
-                        self.input.history_index = None;
-                        self.input.buffer.clear();
-                        self.input.cursor = 0;
-                        self.input.completions.clear();
-
+                    if let Some(text) = self.input.submit() {
                         if text.starts_with('/') {
                             self.handle_slash_command(&text).await;
                         } else {
@@ -34,23 +27,12 @@ impl App {
         match key.code {
             KeyCode::Enter => {
                 if key.modifiers.contains(KeyModifiers::SHIFT) {
-                    // Multi-line input
-                    self.input.buffer.push('\n');
-                    self.input.cursor = self.input.buffer.len();
-                } else {
-                    let text = self.input.buffer.trim().to_string();
-                    if !text.is_empty() {
-                        self.input.history.push(text.clone());
-                        self.input.history_index = None;
-                        self.input.buffer.clear();
-                        self.input.cursor = 0;
-                        self.input.completions.clear();
-
-                        if text.starts_with('/') {
-                            self.handle_slash_command(&text).await;
-                        } else {
-                            self.send_message(text).await;
-                        }
+                    self.input.insert_newline();
+                } else if let Some(text) = self.input.submit() {
+                    if text.starts_with('/') {
+                        self.handle_slash_command(&text).await;
+                    } else {
+                        self.send_message(text).await;
                     }
                 }
             }
@@ -65,29 +47,35 @@ impl App {
                     self.input.completions.clear();
                 }
             }
+            KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Ctrl+C — clear input or interrupt
+                if c == 'c' {
+                    self.input.buffer.clear();
+                    self.input.cursor = 0;
+                    self.input.completions.clear();
+                }
+            }
             KeyCode::Char(c) => {
-                self.input.buffer.insert(self.input.cursor, c);
-                self.input.cursor += 1;
+                self.input.insert_char(c);
                 self.input.auto_complete();
             }
             KeyCode::Backspace
                 if self.input.cursor > 0 => {
-                    self.input.cursor -= 1;
-                    self.input.buffer.remove(self.input.cursor);
+                    self.input.delete_before();
                     self.input.auto_complete();
                 }
             KeyCode::Delete
                 if self.input.cursor < self.input.buffer.len() => {
-                    self.input.buffer.remove(self.input.cursor);
+                    self.input.delete_after();
                     self.input.auto_complete();
                 }
             KeyCode::Left
                 if self.input.cursor > 0 => {
-                    self.input.cursor -= 1;
+                    self.input.move_left();
                 }
             KeyCode::Right
                 if self.input.cursor < self.input.buffer.len() => {
-                    self.input.cursor += 1;
+                    self.input.move_right();
                 }
             KeyCode::Home => {
                 self.input.cursor = 0;
@@ -127,7 +115,7 @@ impl App {
                     let idx = self.input.completion_index % self.input.completions.len();
                     self.input.buffer = self.input.completions[idx].name.clone();
                     self.input.cursor = self.input.buffer.len();
-                    self.input.completion_index += 1;
+                    self.input.completion_index = self.input.completion_index.wrapping_add(1);
                 } else {
                     self.tab_next();
                 }
@@ -137,9 +125,6 @@ impl App {
             }
             _ => {}
         }
-
-        // Auto-complete on input change
-        self.input.auto_complete();
     }
 
     pub fn update_search_results(&mut self) {
@@ -207,7 +192,7 @@ impl App {
         }
 
         // Resolve aliases
-        let _resolved_cmd = if cmd.starts_with('/') {
+        let resolved_cmd = if cmd.starts_with('/') {
             let alias_name = cmd.split_whitespace().next().unwrap_or(cmd);
             if let Some(resolved) = self.aliases.get(alias_name) {
                 let args = cmd[alias_name.len()..].trim();
@@ -224,17 +209,17 @@ impl App {
         };
 
         // Handle !! and !N history shortcuts
-        let cmd = if cmd == "!!" {
+        let cmd = if resolved_cmd == "!!" {
             self.input.history.last().cloned().unwrap_or_default()
-        } else if cmd.starts_with('!') && cmd[1..].chars().all(|c| c.is_ascii_digit()) {
-            let idx: usize = cmd[1..].parse().unwrap_or(0);
+        } else if resolved_cmd.starts_with('!') && resolved_cmd[1..].chars().all(|c| c.is_ascii_digit()) {
+            let idx: usize = resolved_cmd[1..].parse().unwrap_or(0);
             if idx > 0 && idx <= self.input.history.len() {
                 self.input.history[idx - 1].clone()
             } else {
-                cmd.to_string()
+                resolved_cmd
             }
         } else {
-            cmd.to_string()
+            resolved_cmd
         };
         let cmd = cmd.as_str();
 
@@ -328,24 +313,11 @@ impl App {
                 let before = self.messages.len();
                 let keep_count = 20;
                 if self.messages.len() > keep_count {
-                    let system_msgs: Vec<_> = self.messages.iter()
-                        .enumerate()
-                        .filter(|(_, m)| matches!(m, ChatMessage::System(_)))
-                        .map(|(i, _)| i)
-                        .collect();
-                    let mut keep_indices: Vec<usize> = system_msgs;
+                    // Keep the last N messages (prioritizing conversation context)
                     let start = self.messages.len().saturating_sub(keep_count);
-                    for i in start..self.messages.len() {
-                        if !keep_indices.contains(&i) {
-                            keep_indices.push(i);
-                        }
-                    }
-                    keep_indices.sort();
-                    keep_indices.dedup();
-
-                    let new_messages: Vec<_> = keep_indices.iter().filter_map(|&i| self.messages.get(i).cloned()).collect();
-                    let removed = before - new_messages.len();
-                    self.messages = new_messages;
+                    let keep_msgs: Vec<_> = self.messages[start..].to_vec();
+                    let removed = before - keep_msgs.len();
+                    self.messages = keep_msgs;
                     self.chat_scroll = 0;
                     self.message_references.clear();
                     self.messages.push(ChatMessage::System(format!(
@@ -366,7 +338,7 @@ impl App {
                             for s in &sessions {
                                 lines.push(format!(
                                     "  {} | {} | 消息: {} | {}",
-                                    &s.id[..s.id.len().min(8)],
+                                    s.id.chars().take(8).collect::<String>(),
                                     s.name,
                                     s.message_count,
                                     s.updated_at

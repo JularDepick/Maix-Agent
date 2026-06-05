@@ -84,15 +84,41 @@ pub async fn cmd_skill(client: &MaixClient, action: SkillAction) {
                     );
                 }
             }
-            Err(e) => eprintln!("Error: {e}"),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         },
         SkillAction::Enable { name } => match client.enable_skill(&name).await {
             Ok(_) => println!("Enabled: {name}"),
-            Err(e) => eprintln!("Error: {e}"),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         },
         SkillAction::Disable { name } => match client.disable_skill(&name).await {
             Ok(_) => println!("Disabled: {name}"),
-            Err(e) => eprintln!("Error: {e}"),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        },
+        SkillAction::Uninstall { name } => {
+            let skills_dir = home::home_dir()
+                .map(|h| h.join(".maix").join("skills"))
+                .unwrap_or_else(|| PathBuf::from(".maix/skills"));
+            let skill_path = skills_dir.join(&name);
+            if !skill_path.exists() {
+                eprintln!("Skill '{}' not found at {}", name, skill_path.display());
+                std::process::exit(1);
+            }
+            match std::fs::remove_dir_all(&skill_path) {
+                Ok(_) => println!("Uninstalled skill: {name}"),
+                Err(e) => {
+                    eprintln!("Error removing skill: {e}");
+                    std::process::exit(1);
+                }
+            }
         },
     }
 }

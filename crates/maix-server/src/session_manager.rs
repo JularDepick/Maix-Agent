@@ -69,6 +69,7 @@ impl SessionStore {
     pub async fn increment_message_count(&self, id: &str) {
         if let Some(handle) = self.handles.write().await.get_mut(id) {
             handle.meta.message_count += 1;
+            handle.meta.updated_at = chrono::Utc::now().to_rfc3339();
         }
     }
 }

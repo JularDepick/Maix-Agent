@@ -1027,6 +1027,9 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_shortcut_bar(f: &mut Frame, area: Rect, app: &App) {
+    if area.height < 1 {
+        return;
+    }
     let shortcuts = if !app.input.completions.is_empty() {
         "Tab/↑↓ 选择 │ Enter 确认 │ 1-9 直选 │ Esc 取消"
     } else if app.search_mode {

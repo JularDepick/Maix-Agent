@@ -22,7 +22,10 @@ pub async fn cmd_session(client: &MaixClient, action: SessionAction) {
                     }
                 }
             }
-            Err(e) => eprintln!("Error: {e}"),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         },
         SessionAction::Show { id } => match client.get_session_messages(&id, 100).await {
             Ok(msgs) => {
@@ -34,12 +37,21 @@ pub async fn cmd_session(client: &MaixClient, action: SessionAction) {
                     }
                 }
             }
-            Err(e) => eprintln!("Error: {e}"),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         },
         SessionAction::Delete { id } => match client.delete_session(&id).await {
             Ok(true) => println!("Deleted session: {id}"),
-            Ok(false) => println!("Session not found: {id}"),
-            Err(e) => eprintln!("Error: {e}"),
+            Ok(false) => {
+                eprintln!("Session not found: {id}");
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         },
         SessionAction::Fork { id, from, name } => {
             let from_id = match from {

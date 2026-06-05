@@ -126,8 +126,17 @@ async fn check_network(config: &Config) -> DiagnosticResult {
         .unwrap();
     let url = format!("{}/models", config.api_base.trim_end_matches('/'));
     match client.get(&url).send().await {
-        Ok(_resp) => {
+        Ok(resp) => {
             let elapsed = start.elapsed().as_millis();
+            let code = resp.status().as_u16();
+            if code == 401 || code == 403 {
+                return DiagnosticResult {
+                    name: "网络连通".into(),
+                    status: DiagStatus::Warn,
+                    message: format!("可达但认证失败 (HTTP {code})，请检查 API Key"),
+                    fix_hint: Some("确认 ~/.maix/settings.json 中的 api_key 正确".into()),
+                };
+            }
             let status = if elapsed > 2000 {
                 DiagStatus::Warn
             } else {
@@ -257,18 +266,7 @@ fn check_git() -> DiagnosticResult {
 }
 
 fn dirs_home() -> std::path::PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var("USERPROFILE")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-    }
+    home::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
 fn check_skills_dir() -> DiagnosticResult {
@@ -339,7 +337,7 @@ async fn check_version() -> DiagnosticResult {
         }
         _ => DiagnosticResult {
             name: "版本检查".into(),
-            status: DiagStatus::Pass,
+            status: DiagStatus::Warn,
             message: format!("v{} (无法检查更新)", current),
             fix_hint: None,
         },

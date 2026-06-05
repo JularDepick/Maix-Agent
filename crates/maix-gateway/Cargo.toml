@@ -1,6 +1,6 @@
 [package]
 name = "maix-gateway"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 
 [[bin]]
@@ -25,3 +25,5 @@ chrono.workspace = true
 futures.workspace = true
 tower-http = { version = "0.5", features = ["cors"] }
 reqwest.workspace = true
+hmac.workspace = true
+sha2.workspace = true

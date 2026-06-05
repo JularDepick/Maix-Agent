@@ -38,12 +38,17 @@ pub fn agent_event_to_chat_output(session_id: &str, event: AgentEvent) -> pb::Ch
             arguments: Some(maix_core::json_to_prost_struct(args)),
             needs_approval,
         }),
-        AgentEvent::ToolCallApproved | AgentEvent::ToolCallDenied(_) => {
-            // These are intermediate events; they map to nothing visible
-            // The approval flow is communicated via ToolCallRequest + Status
+        AgentEvent::ToolCallApproved => {
             pb::chat_output::Output::Status(pb::StatusUpdate {
                 session_id: session_id.into(),
                 state: pb::AgentState::ExecutingTool.into(),
+            })
+        }
+        AgentEvent::ToolCallDenied(reason) => {
+            pb::chat_output::Output::Error(pb::ErrorEvent {
+                session_id: session_id.into(),
+                code: "TOOL_CALL_DENIED".into(),
+                message: if reason.is_empty() { "Tool call was denied".into() } else { reason },
             })
         }
         AgentEvent::ToolResult { id, result } => {

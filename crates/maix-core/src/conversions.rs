@@ -25,7 +25,7 @@ impl From<pb_common::Role> for types::Role {
             pb_common::Role::User => types::Role::User,
             pb_common::Role::Assistant => types::Role::Assistant,
             pb_common::Role::Tool => types::Role::Tool,
-            pb_common::Role::Unspecified => types::Role::System,
+            pb_common::Role::Unspecified => types::Role::User,
         }
     }
 }
@@ -324,9 +324,9 @@ impl From<pb_core::AgentInfo> for Identity {
     fn from(info: pb_core::AgentInfo) -> Self {
         Identity::new(
             info.name.clone(),
-            info.name.clone(),
             info.name,
             info.description,
+            String::new(),
         )
         .with_traits(info.traits)
         .with_domains(info.domains)

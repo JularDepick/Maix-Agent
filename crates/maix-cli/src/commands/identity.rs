@@ -13,11 +13,17 @@ pub async fn cmd_identity(client: &MaixClient, action: IdentityAction) {
                     println!("  {}", a.name);
                 }
             }
-            Err(e) => eprintln!("Error: {e}"),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         },
         IdentityAction::Activate { name } => match client.activate_agent(&name).await {
             Ok(_) => println!("Activated: {name}"),
-            Err(e) => eprintln!("Error: {e}"),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         },
     }
 }

@@ -36,12 +36,15 @@ struct Cli {
 
 type GatewayState = Arc<MaixClient>;
 
-fn error_response(message: impl Into<String>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "error": {
-            "message": message.into()
-        }
-    }))
+fn error_response(message: impl Into<String>) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({
+            "error": {
+                "message": message.into()
+            }
+        })),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +139,7 @@ async fn main() {
         .route("/v1/chat", post(chat_sse))
         .route("/v1/ws/chat", get(ws_chat))
         .route("/v1/ws/events", get(ws_events))
-        .route("/v1/sessions", get(list_sessions).delete(delete_session))
+        .route("/v1/sessions", get(list_sessions))
         .route("/v1/sessions/{id}", delete(delete_session_by_id))
         .route("/v1/sessions/{id}/messages", get(get_session_messages))
         .route("/v1/memory", get(search_memory).post(save_memory))
@@ -305,56 +308,64 @@ async fn handle_ws_chat(mut socket: WebSocket, client: Arc<MaixClient>) {
         }
     };
     while let Some(Ok(msg)) = socket.recv().await {
-        if let Message::Text(text) = msg {
-            let text: String = text.to_string();
-            match client.chat_with_message(&session_id, &text).await {
-                Ok(mut handle) => {
-                    let _ = socket.send(Message::Text(
-                        serde_json::json!({"type": "thinking", "session_id": session_id}).to_string().into()
-                    )).await;
+        match msg {
+            Message::Text(text) => {
+                let text: String = text.to_string();
+                match client.chat_with_message(&session_id, &text).await {
+                    Ok(mut handle) => {
+                        let _ = socket.send(Message::Text(
+                            serde_json::json!({"type": "thinking", "session_id": session_id}).to_string().into()
+                        )).await;
 
-                    while let Some(Ok(msg)) = handle.recv().await {
-                        if let Some(out) = msg.output {
-                            let resp = match out {
-                                pb::chat_output::Output::TextDelta(d) => {
-                                    if d.text.is_empty() {
-                                        continue;
+                        while let Some(Ok(msg)) = handle.recv().await {
+                            if let Some(out) = msg.output {
+                                let resp = match out {
+                                    pb::chat_output::Output::TextDelta(d) => {
+                                        if d.text.is_empty() {
+                                            continue;
+                                        }
+                                        serde_json::json!({"type": "text", "content": d.text})
                                     }
-                                    serde_json::json!({"type": "text", "content": d.text})
+                                    pb::chat_output::Output::ToolCall(tc) => {
+                                        serde_json::json!({
+                                            "type": "tool_call",
+                                            "name": tc.tool_name,
+                                            "args": tc.arguments.map(maix_core::prost_struct_to_json),
+                                        })
+                                    }
+                                    pb::chat_output::Output::ToolResult(tr) => {
+                                        serde_json::json!({
+                                            "type": "tool_result",
+                                            "result": tr.result,
+                                        })
+                                    }
+                                    pb::chat_output::Output::Complete(_) => {
+                                        serde_json::json!({"type": "done", "session_id": session_id})
+                                    }
+                                    pb::chat_output::Output::Error(e) => {
+                                        serde_json::json!({"type": "error", "message": e.message})
+                                    }
+                                    _ => continue,
+                                };
+                                if socket.send(Message::Text(resp.to_string().into())).await.is_err() {
+                                    break;
                                 }
-                                pb::chat_output::Output::ToolCall(tc) => {
-                                    serde_json::json!({
-                                        "type": "tool_call",
-                                        "name": tc.tool_name,
-                                        "args": tc.arguments.map(maix_core::prost_struct_to_json),
-                                    })
-                                }
-                                pb::chat_output::Output::ToolResult(tr) => {
-                                    serde_json::json!({
-                                        "type": "tool_result",
-                                        "result": tr.result,
-                                    })
-                                }
-                                pb::chat_output::Output::Complete(_) => {
-                                    serde_json::json!({"type": "done", "session_id": session_id})
-                                }
-                                pb::chat_output::Output::Error(e) => {
-                                    serde_json::json!({"type": "error", "message": e.message})
-                                }
-                                _ => continue,
-                            };
-                            if socket.send(Message::Text(resp.to_string().into())).await.is_err() {
-                                break;
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    let _ = socket.send(Message::Text(
-                        serde_json::json!({"type": "error", "message": e.to_string()}).to_string().into()
-                    )).await;
+                    Err(e) => {
+                        let _ = socket.send(Message::Text(
+                            serde_json::json!({"type": "error", "message": e.to_string()}).to_string().into()
+                        )).await;
+                    }
                 }
             }
+            Message::Close(_) => break,
+            Message::Ping(data) => {
+                let _ = socket.send(Message::Pong(data)).await;
+            }
+            Message::Pong(_) => {}
+            _ => {}
         }
     }
 }
@@ -420,28 +431,24 @@ async fn list_sessions(State(client): State<GatewayState>) -> Json<Vec<serde_jso
     }
 }
 
-async fn delete_session(State(client): State<GatewayState>) -> StatusCode {
-    let sessions = client.list_sessions().await.unwrap_or_default();
-    for s in &sessions {
-        let _ = client.delete_session(&s.id).await;
-    }
-    StatusCode::NO_CONTENT
-}
-
 async fn delete_session_by_id(
     State(client): State<GatewayState>,
     Path(id): Path<String>,
 ) -> StatusCode {
     match client.delete_session(&id).await {
         Ok(true) => StatusCode::NO_CONTENT,
-        _ => StatusCode::NOT_FOUND,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!("delete_session error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
 async fn get_session_messages(
     State(client): State<GatewayState>,
     Path(id): Path<String>,
-) -> Json<serde_json::Value> {
+) -> (StatusCode, Json<serde_json::Value>) {
     match client.get_session_messages(&id, 100).await {
         Ok(msgs) => {
             let items: Vec<_> = msgs.iter().map(|m| {
@@ -452,7 +459,7 @@ async fn get_session_messages(
                     "created_at": m.created_at,
                 })
             }).collect();
-            Json(serde_json::json!({ "messages": items }))
+            (StatusCode::OK, Json(serde_json::json!({ "messages": items })))
         }
         Err(e) => error_response(e.to_string()),
     }
@@ -465,7 +472,7 @@ async fn get_session_messages(
 async fn search_memory(
     State(client): State<GatewayState>,
     Query(query): Query<MemorySearchQuery>,
-) -> Json<serde_json::Value> {
+) -> (StatusCode, Json<serde_json::Value>) {
     let limit = query.limit.unwrap_or(10);
     match client.search_memory(&query.q, limit).await {
         Ok(entries) => {
@@ -479,7 +486,7 @@ async fn search_memory(
                     "created_at": e.created_at,
                 })
             }).collect();
-            Json(serde_json::json!({ "entries": items }))
+            (StatusCode::OK, Json(serde_json::json!({ "entries": items })))
         }
         Err(e) => error_response(e.to_string()),
     }
@@ -500,22 +507,26 @@ async fn delete_memory(
 ) -> StatusCode {
     match client.forget_memory(&id).await {
         Ok(true) => StatusCode::NO_CONTENT,
-        _ => StatusCode::NOT_FOUND,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!("forget_memory error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
-async fn compact_memory(State(client): State<GatewayState>) -> Json<serde_json::Value> {
-    match client.search_memory("", 0).await {
-        Ok(_) => Json(serde_json::json!({ "status": "compacted" })),
-        Err(e) => Json(serde_json::json!({ "status": "error", "message": e.to_string() })),
-    }
+async fn compact_memory(State(_client): State<GatewayState>) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({ "status": "not_implemented", "message": "Memory compaction is not yet implemented" })),
+    )
 }
 
 // ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------
 
-async fn list_tasks(State(client): State<GatewayState>) -> Json<serde_json::Value> {
+async fn list_tasks(State(client): State<GatewayState>) -> (StatusCode, Json<serde_json::Value>) {
     match client.list_tasks().await {
         Ok(tasks) => {
             let tasks: Vec<_> = tasks.iter().map(|t| {
@@ -527,7 +538,7 @@ async fn list_tasks(State(client): State<GatewayState>) -> Json<serde_json::Valu
                     "assigned": t.assigned,
                 })
             }).collect();
-            Json(serde_json::json!({ "tasks": tasks }))
+            (StatusCode::OK, Json(serde_json::json!({ "tasks": tasks })))
         }
         Err(e) => error_response(e.to_string()),
     }
@@ -548,7 +559,11 @@ async fn delete_task(
 ) -> StatusCode {
     match client.cancel_task(&id).await {
         Ok(true) => StatusCode::NO_CONTENT,
-        _ => StatusCode::NOT_FOUND,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!("cancel_task error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -557,8 +572,10 @@ async fn reposition_task(
     Path(id): Path<String>,
     Json(req): Json<PatchTaskRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    if let Some(_pos) = &req.position {
-        // Reposition via resume with position
+    if let Some(pos) = &req.position {
+        // The task queue supports repositioning but it is not yet exposed via gRPC.
+        // For now, log the requested position and resume the task as a best-effort.
+        tracing::info!("Reposition task {} to '{}' (gRPC reposition not yet available)", id, pos);
         client.resume_task(&id).await
             .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     }
@@ -583,7 +600,11 @@ async fn suspend_task(
 ) -> StatusCode {
     match client.suspend_task(&id).await {
         Ok(true) => StatusCode::OK,
-        _ => StatusCode::NOT_FOUND,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!("suspend_task error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -593,7 +614,11 @@ async fn resume_task(
 ) -> StatusCode {
     match client.resume_task(&id).await {
         Ok(true) => StatusCode::OK,
-        _ => StatusCode::NOT_FOUND,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!("resume_task error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -601,7 +626,7 @@ async fn resume_task(
 // Tools
 // ---------------------------------------------------------------------------
 
-async fn list_tools(State(client): State<GatewayState>) -> Json<serde_json::Value> {
+async fn list_tools(State(client): State<GatewayState>) -> (StatusCode, Json<serde_json::Value>) {
     match client.list_tools().await {
         Ok(tools) => {
             let defs: Vec<_> = tools.iter().map(|t| {
@@ -612,7 +637,7 @@ async fn list_tools(State(client): State<GatewayState>) -> Json<serde_json::Valu
                     "risk_level": t.risk_level,
                 })
             }).collect();
-            Json(serde_json::json!({ "tools": defs }))
+            (StatusCode::OK, Json(serde_json::json!({ "tools": defs })))
         }
         Err(e) => error_response(e.to_string()),
     }
@@ -676,7 +701,11 @@ async fn remove_skill(
 ) -> StatusCode {
     match client.remove_skill(&name).await {
         Ok(true) => StatusCode::NO_CONTENT,
-        _ => StatusCode::NOT_FOUND,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!("remove_skill error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -686,7 +715,11 @@ async fn enable_skill(
 ) -> StatusCode {
     match client.enable_skill(&name).await {
         Ok(true) => StatusCode::OK,
-        _ => StatusCode::NOT_FOUND,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!("enable_skill error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -696,7 +729,11 @@ async fn disable_skill(
 ) -> StatusCode {
     match client.disable_skill(&name).await {
         Ok(true) => StatusCode::OK,
-        _ => StatusCode::NOT_FOUND,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!("disable_skill error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -704,7 +741,7 @@ async fn disable_skill(
 // Identities
 // ---------------------------------------------------------------------------
 
-async fn list_identities(State(client): State<GatewayState>) -> Json<serde_json::Value> {
+async fn list_identities(State(client): State<GatewayState>) -> (StatusCode, Json<serde_json::Value>) {
     match client.list_agents().await {
         Ok(resp) => {
             let list: Vec<_> = resp.agents.iter().map(|id| {
@@ -716,7 +753,7 @@ async fn list_identities(State(client): State<GatewayState>) -> Json<serde_json:
                     "active": active,
                 })
             }).collect();
-            Json(serde_json::json!({ "identities": list }))
+            (StatusCode::OK, Json(serde_json::json!({ "identities": list })))
         }
         Err(e) => error_response(e.to_string()),
     }
@@ -762,7 +799,7 @@ async fn activate_identity(
 // Architectures
 // ---------------------------------------------------------------------------
 
-async fn list_architectures(State(client): State<GatewayState>) -> Json<serde_json::Value> {
+async fn list_architectures(State(client): State<GatewayState>) -> (StatusCode, Json<serde_json::Value>) {
     match client.list_architectures().await {
         Ok(archs) => {
             let list: Vec<_> = archs.iter().map(|a| {
@@ -775,7 +812,7 @@ async fn list_architectures(State(client): State<GatewayState>) -> Json<serde_js
                     "flow_count": a.flow_count,
                 })
             }).collect();
-            Json(serde_json::json!({ "architectures": list }))
+            (StatusCode::OK, Json(serde_json::json!({ "architectures": list })))
         }
         Err(e) => error_response(e.to_string()),
     }
@@ -835,9 +872,9 @@ async fn run_architecture(
 // Work Status
 // ---------------------------------------------------------------------------
 
-async fn work_status_snapshot(State(client): State<GatewayState>) -> Json<serde_json::Value> {
+async fn work_status_snapshot(State(client): State<GatewayState>) -> (StatusCode, Json<serde_json::Value>) {
     match client.get_work_status().await {
-        Ok(snap) => Json(serde_json::json!({
+        Ok(snap) => (StatusCode::OK, Json(serde_json::json!({
             "total_agents": snap.total_agents,
             "active_agents": snap.active_agents,
             "idle_agents": snap.idle_agents,
@@ -847,7 +884,7 @@ async fn work_status_snapshot(State(client): State<GatewayState>) -> Json<serde_
             "total_tokens": snap.total_tokens,
             "total_cost": snap.total_cost,
             "uptime_secs": snap.uptime_secs,
-        })),
+        }))),
         Err(e) => error_response(e.to_string()),
     }
 }
@@ -897,15 +934,15 @@ mod tests {
 
     #[test]
     fn test_error_response() {
-        let resp = error_response("something went wrong");
-        let val = resp.0;
-        assert_eq!(val["error"]["message"], "something went wrong");
+        let (status, json) = error_response("something went wrong");
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(json.0["error"]["message"], "something went wrong");
     }
 
     #[test]
     fn test_error_response_empty() {
-        let resp = error_response("");
-        let val = resp.0;
-        assert_eq!(val["error"]["message"], "");
+        let (status, json) = error_response("");
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(json.0["error"]["message"], "");
     }
 }

@@ -648,18 +648,28 @@ impl InputState {
         if self.cursor >= self.buffer.len() {
             return;
         }
-        // Skip current word
+        // Skip current word (advance by char, not byte)
         let mut pos = self.cursor;
-        while pos < self.buffer.len() && !self.buffer[pos..].starts_with(' ')
-            && !self.buffer[pos..].starts_with('/')
-            && !self.buffer[pos..].starts_with('\\')
-            && !self.buffer[pos..].starts_with('\n')
-        {
-            pos += 1;
+        while pos < self.buffer.len() {
+            if let Some(ch) = self.buffer[pos..].chars().next() {
+                if ch == ' ' || ch == '/' || ch == '\\' || ch == '\n' {
+                    break;
+                }
+                pos += ch.len_utf8();
+            } else {
+                break;
+            }
         }
         // Skip spaces
-        while pos < self.buffer.len() && self.buffer[pos..].starts_with(' ') {
-            pos += 1;
+        while pos < self.buffer.len() {
+            if let Some(ch) = self.buffer[pos..].chars().next() {
+                if ch != ' ' {
+                    break;
+                }
+                pos += ch.len_utf8();
+            } else {
+                break;
+            }
         }
         self.cursor = pos;
     }

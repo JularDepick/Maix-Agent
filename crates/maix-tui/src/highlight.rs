@@ -327,7 +327,10 @@ impl SimpleHighlighter {
             // Numbers
             if chars[i].is_ascii_digit() {
                 let start = i;
-                while i < len && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == '_' || chars[i] == 'x' || chars[i] == 'b') {
+                while i < len && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == '_'
+                    || (chars[i] == 'x' && i > 0 && chars[i - 1] == '0')
+                    || (chars[i] == 'b' && i > 0 && chars[i - 1] == '0'))
+                {
                     i += 1;
                 }
                 tokens.push(HighlightedToken::new(&line[start..i], TokenKind::Number));

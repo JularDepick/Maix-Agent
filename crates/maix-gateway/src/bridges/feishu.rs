@@ -2,6 +2,10 @@
 //! Feishu (Lark) bot bridge.
 
 use super::*;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
+type HmacSha256 = Hmac<Sha256>;
 
 /// Feishu bridge implementation.
 pub struct FeishuBridge {
@@ -52,6 +56,23 @@ impl FeishuBridge {
     }
 }
 
+/// Encode bytes as lowercase hex string.
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// Constant-time comparison to avoid timing side-channels.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 #[async_trait::async_trait]
 impl PlatformBridge for FeishuBridge {
     fn platform(&self) -> &str {
@@ -60,15 +81,16 @@ impl PlatformBridge for FeishuBridge {
 
     fn verify_signature(&self, headers: &[(String, String)], body: &[u8]) -> bool {
         // Feishu verification: check X-Lark-Signature header
-        // Signature = SHA256(timestamp + nonce + app_secret + body)
+        // Signature = HMAC-SHA256(timestamp + nonce + body, app_secret)
         let signature = headers
             .iter()
             .find(|(k, _)| k.to_lowercase() == "x-lark-signature")
             .map(|(_, v)| v.as_str());
 
         if let Some(sig) = signature {
-            // If signature header is present, verify it
-            // Feishu sends timestamp in X-Lark-Request-Timestamp and nonce in X-Lark-Request-Nonce
+            if sig.is_empty() {
+                return false;
+            }
             let timestamp = headers
                 .iter()
                 .find(|(k, _)| k.to_lowercase() == "x-lark-request-timestamp")
@@ -80,15 +102,19 @@ impl PlatformBridge for FeishuBridge {
                 .map(|(_, v)| v.as_str())
                 .unwrap_or("");
 
-            // HMAC-SHA256(timestamp + nonce + body, app_secret) — simplified check
-            // In production, use proper crypto crate
-            if sig.is_empty() {
-                return false;
-            }
-            // Accept non-empty signature when crypto verification is not configured
-            !timestamp.is_empty() || !nonce.is_empty() || !body.is_empty()
+            // Compute expected signature: HMAC-SHA256(timestamp + nonce + body, app_secret)
+            let mut mac = match HmacSha256::new_from_slice(self.app_secret.as_bytes()) {
+                Ok(m) => m,
+                Err(_) => return false,
+            };
+            mac.update(timestamp.as_bytes());
+            mac.update(nonce.as_bytes());
+            mac.update(body);
+            let expected = hex_encode(&mac.finalize().into_bytes());
+
+            constant_time_eq(sig.as_bytes(), expected.as_bytes())
         } else {
-            // Feishu also supports challenge-response verification
+            // Feishu also supports challenge-response verification (no signature header)
             true
         }
     }
@@ -330,8 +356,14 @@ mod tests {
     #[test]
     fn test_feishu_verify_signature_present() {
         let bridge = FeishuBridge::new("app", "secret", "token");
+        // Compute correct HMAC-SHA256(timestamp + nonce + body, secret)
+        let mut mac = HmacSha256::new_from_slice(b"secret").unwrap();
+        mac.update(b"");
+        mac.update(b"");
+        mac.update(b"body");
+        let expected_sig = hex_encode(&mac.finalize().into_bytes());
         let headers = vec![
-            ("x-lark-signature".to_string(), "abc123".to_string()),
+            ("x-lark-signature".to_string(), expected_sig),
         ];
         assert!(bridge.verify_signature(&headers, b"body"));
     }
@@ -355,8 +387,14 @@ mod tests {
     #[test]
     fn test_feishu_verify_signature_case_insensitive() {
         let bridge = FeishuBridge::new("app", "secret", "token");
+        // Compute correct HMAC-SHA256(timestamp + nonce + body, secret)
+        let mut mac = HmacSha256::new_from_slice(b"secret").unwrap();
+        mac.update(b"");
+        mac.update(b"");
+        mac.update(b"body");
+        let expected_sig = hex_encode(&mac.finalize().into_bytes());
         let headers = vec![
-            ("X-Lark-Signature".to_string(), "sig".to_string()),
+            ("X-Lark-Signature".to_string(), expected_sig),
         ];
         assert!(bridge.verify_signature(&headers, b"body"));
     }

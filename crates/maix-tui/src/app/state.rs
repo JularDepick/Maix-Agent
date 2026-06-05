@@ -3,17 +3,6 @@
 use super::*;
 
 impl App {
-    /// Trim messages if exceeding limit.
-    pub fn trim_messages(&mut self) {
-        if self.messages.len() > self.max_messages {
-            let excess = self.messages.len() - self.max_messages;
-            self.messages.drain(..excess);
-            self.messages.insert(0, ChatMessage::System(format!(
-                "(已压缩 {} 条旧消息)", excess
-            )));
-        }
-    }
-
     /// Get context-aware command suggestions based on conversation content.
     pub fn get_context_suggestions(&self) -> Vec<String> {
         let mut suggestions = Vec::new();
@@ -226,7 +215,8 @@ impl App {
                 Some(ChatMessage::Assistant(t)) | Some(ChatMessage::User(t)) | Some(ChatMessage::System(t)) => t.as_str(),
                 _ => return,
             };
-            let new_offset = (offset as i32 + delta).max(0).min(msg_text.len() as i32) as usize;
+            let char_count = msg_text.chars().count();
+            let new_offset = (offset as i32 + delta).max(0).min(char_count as i32) as usize;
             self.select_end = Some((msg_idx, new_offset));
         }
     }
@@ -243,10 +233,20 @@ impl App {
                     ChatMessage::Assistant(t) | ChatMessage::User(t) | ChatMessage::System(t) => t.as_str(),
                     _ => continue,
                 };
-                let from = if idx == start.0 { start.1 } else { 0 };
-                let to = if idx == end.0 { end.1.min(msg_text.len()) } else { msg_text.len() };
-                if from < msg_text.len() && to <= msg_text.len() && from < to {
-                    text.push_str(&msg_text[from..to]);
+                // Convert char offsets to byte offsets
+                let from_byte = if idx == start.0 {
+                    msg_text.char_indices().nth(start.1).map(|(i, _)| i).unwrap_or(msg_text.len())
+                } else {
+                    0
+                };
+                let to_byte = if idx == end.0 {
+                    let char_idx = end.1.min(msg_text.chars().count());
+                    msg_text.char_indices().nth(char_idx).map(|(i, _)| i).unwrap_or(msg_text.len())
+                } else {
+                    msg_text.len()
+                };
+                if from_byte < to_byte && to_byte <= msg_text.len() {
+                    text.push_str(&msg_text[from_byte..to_byte]);
                 }
                 if idx < end.0 {
                     text.push('\n');
@@ -263,8 +263,14 @@ impl App {
                     .spawn()
                 {
                     if let Some(mut stdin) = child.stdin.take() {
-                        let _ = stdin.write_all(text.as_bytes());
+                        // clip.exe expects UTF-16LE
+                        let utf16: Vec<u16> = text.encode_utf16().collect();
+                        let bytes: &[u8] = unsafe {
+                            std::slice::from_raw_parts(utf16.as_ptr() as *const u8, utf16.len() * 2)
+                        };
+                        let _ = stdin.write_all(bytes);
                     }
+                    let _ = child.wait();
                 }
             }
             #[cfg(target_os = "macos")]
@@ -277,6 +283,7 @@ impl App {
                     if let Some(mut stdin) = child.stdin.take() {
                         let _ = stdin.write_all(text.as_bytes());
                     }
+                    let _ = child.wait();
                 }
             }
             #[cfg(target_os = "linux")]
@@ -290,6 +297,7 @@ impl App {
                     if let Some(mut stdin) = child.stdin.take() {
                         let _ = stdin.write_all(text.as_bytes());
                     }
+                    let _ = child.wait();
                 }
             }
         }
@@ -306,7 +314,7 @@ impl App {
                 if let Some(m) = self.memories.get(idx) {
                     self.messages.push(ChatMessage::System(format!(
                         "[{}] kind={} {}",
-                        &m.id[..m.id.len().min(8)],
+                        m.id.chars().take(8).collect::<String>(),
                         m.kind,
                         m.content,
                     )));

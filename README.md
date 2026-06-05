@@ -169,7 +169,7 @@ maix-agent/
 
 ## Acknowledgments
 - Thanks to open source projects [[DeepSeek-TUI]](https://github.com/Hmbown/DeepSeek-TUI) and [[OpenHanako]](https://github.com/liliMozi/openhanako) for providing implementation ideas and reference specifications for this project.
-- Thanks to [[Xiaomi MiMo-V2.5 Series Open Source & Orbit Hundred Trillion Token Plan]]() for providing **1600M TOKEN** large model API service sponsorship for this project.
+- Thanks to [[Xiaomi MiMo-V2.5 Series Open Source & Orbit Hundred Trillion Token Plan]]() for providing **1600M credits** large model API service sponsorship for this project.
   <img src="./.github/image/MiMo-V2.5-API-Support.png"/>
 - Thanks to [[DeepSeek Open Platform]](https://platform.deepseek.com) for providing high-quality, low-cost large model API service support for this project.
   <img src="./.github/image/DeepSeek-API-Support.png" width="50%"/>

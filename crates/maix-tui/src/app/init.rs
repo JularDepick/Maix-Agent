@@ -71,7 +71,7 @@ impl App {
                     } else {
                         messages.push(ChatMessage::System(format!(
                             "已恢复会话 {} ({} 条消息)",
-                            &sid[..sid.len().min(8)],
+                            sid.chars().take(8).collect::<String>(),
                             msgs.len()
                         )));
                         for m in &msgs {

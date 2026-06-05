@@ -11,7 +11,7 @@
 //!
 //! # Manage memory
 //! maix memory search "rust"
-//! maix memory add "Rust is a systems programming language"
+//! maix memory list
 //!
 //! # Check system health
 //! maix health
@@ -19,16 +19,16 @@
 //!
 //! # Manage sessions
 //! maix session list
-//! maix session resume <id>
+//! maix session show <id>
 //! ```
 //!
 //! ## Commands
 //!
 //! - `ask` — Send a message to the agent
-//! - `memory` — Search, add, list, forget memories
-//! - `session` — List, resume, fork, delete sessions
-//! - `skill` — Install, list, uninstall skills
-//! - `tool` — List, test tools
+//! - `memory` — Search, list, forget memories
+//! - `session` — List, show, fork, delete sessions
+//! - `skill` — Install, list, enable, disable skills
+//! - `tool` — List, call tools
 //! - `config` — View, set configuration
 //! - `health` — Check system health
 //! - `doctor` — Run diagnostics

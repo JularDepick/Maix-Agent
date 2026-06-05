@@ -15,7 +15,6 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let mut in_code_block = false;
     let mut code_lang = String::new();
-    let mut _code_line_num = 0;
     let mut code_block_lines: Vec<String> = Vec::new();
     let max_code_lines = 30;
 
@@ -33,7 +32,6 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
             } else {
                 in_code_block = true;
                 code_lang = line.strip_prefix("```").unwrap_or("").trim().to_string();
-                _code_line_num = 0;
                 code_block_lines.clear();
                 let lang_display = if code_lang.is_empty() {
                     "code".to_string()
@@ -76,18 +74,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
             continue;
         }
 
-        // Bullet list
-        if line.starts_with("- ") || line.starts_with("* ") {
-            let mut spans = vec![
-                Span::styled("  ", Style::default()),
-                Span::styled("* ", Style::default().fg(ACCENT)),
-            ];
-            spans.extend(parse_inline(&line[2..]));
-            lines.push(Line::from(spans));
-            continue;
-        }
-
-        // Task list
+        // Task list (must be checked before bullet list since "- [ ] " starts with "- ")
         if line.starts_with("- [ ] ") || line.starts_with("* [ ] ") {
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
@@ -103,6 +90,17 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                 Span::styled("☑ ", Style::default().fg(Color::Green)),
             ];
             spans.extend(parse_inline(&line[6..]));
+            lines.push(Line::from(spans));
+            continue;
+        }
+
+        // Bullet list
+        if line.starts_with("- ") || line.starts_with("* ") {
+            let mut spans = vec![
+                Span::styled("  ", Style::default()),
+                Span::styled("* ", Style::default().fg(ACCENT)),
+            ];
+            spans.extend(parse_inline(&line[2..]));
             lines.push(Line::from(spans));
             continue;
         }
@@ -148,6 +146,11 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
         lines.push(Line::from(spans));
     }
 
+    // Handle unclosed code blocks
+    if in_code_block && !code_block_lines.is_empty() {
+        render_code_block(&mut lines, &code_block_lines, &code_lang, max_code_lines);
+    }
+
     lines
 }
 
@@ -159,9 +162,9 @@ fn render_code_block(lines: &mut Vec<Line<'static>>, code_lines: &[String], lang
         code_lines
     };
 
+    let language = crate::highlight::Language::from_extension(lang);
+    let highlighter = crate::highlight::SimpleHighlighter::new(language);
     for (i, code_line) in render_lines.iter().enumerate() {
-        let language = crate::highlight::Language::from_extension(lang);
-        let highlighter = crate::highlight::SimpleHighlighter::new(language);
         let tokens = highlighter.highlight_line(code_line);
 
         let line_num_str = format!("{:>3}│ ", i + 1);
@@ -194,12 +197,12 @@ fn render_code_block(lines: &mut Vec<Line<'static>>, code_lines: &[String], lang
 /// Smart wrap text preserving indentation.
 #[allow(dead_code)]
 pub fn smart_wrap_line(text: &str, max_width: usize) -> Vec<String> {
-    if text.len() <= max_width {
+    if text.chars().count() <= max_width {
         return vec![text.to_string()];
     }
 
-    let indent = text.len() - text.trim_start().len();
-    let indent_str = &text[..indent];
+    let indent_chars = text.chars().take_while(|c| c.is_whitespace()).count();
+    let indent_str: String = text.chars().take(indent_chars).collect();
     let content = text.trim_start();
 
     let mut result = Vec::new();
@@ -207,17 +210,18 @@ pub fn smart_wrap_line(text: &str, max_width: usize) -> Vec<String> {
     let mut current_len = 0;
 
     for word in content.split_whitespace() {
-        if current_len + word.len() + 1 > max_width - indent && !current_line.is_empty() {
+        let word_char_len = word.chars().count();
+        if current_len + word_char_len + 1 > max_width - indent_chars && !current_line.is_empty() {
             result.push(current_line);
             current_line = format!("{}{}", indent_str, word);
-            current_len = indent + word.len();
+            current_len = indent_chars + word_char_len;
         } else {
             if !current_line.is_empty() {
                 current_line.push(' ');
                 current_len += 1;
             }
             current_line.push_str(word);
-            current_len += word.len();
+            current_len += word_char_len;
         }
     }
 
@@ -234,26 +238,40 @@ pub fn highlight_search_matches(text: &str, query: &str) -> Vec<Span<'static>> {
         return vec![Span::raw(text.to_string())];
     }
 
-    let lower_text = text.to_lowercase();
-    let lower_query = query.to_lowercase();
+    let chars: Vec<char> = text.chars().collect();
+    let lower_chars: Vec<char> = text.to_lowercase().chars().collect();
+    let lower_query: Vec<char> = query.to_lowercase().chars().collect();
+    let text_len = chars.len();
+    let query_len = lower_query.len();
     let mut spans = Vec::new();
     let mut last_end = 0;
 
-    while let Some(pos) = lower_text[last_end..].find(&lower_query) {
-        let abs_pos = last_end + pos;
-        if abs_pos > last_end {
-            spans.push(Span::raw(text[last_end..abs_pos].to_string()));
-        }
-        let match_end = abs_pos + query.len();
-        spans.push(Span::styled(
-            text[abs_pos..match_end].to_string(),
-            Style::default().bg(Color::Yellow).fg(Color::Black),
-        ));
-        last_end = match_end;
+    if query_len == 0 || text_len == 0 {
+        return vec![Span::raw(text.to_string())];
     }
 
-    if last_end < text.len() {
-        spans.push(Span::raw(text[last_end..].to_string()));
+    let mut i = 0;
+    while i + query_len <= text_len {
+        if lower_chars[i..i + query_len] == *lower_query {
+            if i > last_end {
+                let before: String = chars[last_end..i].iter().collect();
+                spans.push(Span::raw(before));
+            }
+            let matched: String = chars[i..i + query_len].iter().collect();
+            spans.push(Span::styled(
+                matched,
+                Style::default().bg(Color::Yellow).fg(Color::Black),
+            ));
+            last_end = i + query_len;
+            i = last_end;
+        } else {
+            i += 1;
+        }
+    }
+
+    if last_end < text_len {
+        let remaining: String = chars[last_end..].iter().collect();
+        spans.push(Span::raw(remaining));
     }
 
     if spans.is_empty() {
@@ -297,7 +315,8 @@ pub fn parse_inline(text: &str) -> Vec<Span<'static>> {
                 plain.clear();
             }
             let remaining: String = chars[i + 2..].iter().collect();
-            if let Some(end_pos) = remaining.find("**") {
+            if let Some(byte_pos) = remaining.find("**") {
+                let end_pos = remaining[..byte_pos].chars().count();
                 let bold_text: String = chars[i + 2..i + 2 + end_pos].iter().collect();
                 spans.push(Span::styled(bold_text, Style::default().add_modifier(Modifier::BOLD)));
                 i = i + 2 + end_pos + 2;
@@ -312,7 +331,8 @@ pub fn parse_inline(text: &str) -> Vec<Span<'static>> {
                 plain.clear();
             }
             let remaining: String = chars[i + 1..].iter().collect();
-            if let Some(end_pos) = remaining.find('*') {
+            if let Some(byte_pos) = remaining.find('*') {
+                let end_pos = remaining[..byte_pos].chars().count();
                 let italic_text: String = chars[i + 1..i + 1 + end_pos].iter().collect();
                 spans.push(Span::styled(italic_text, Style::default().fg(Color::Yellow)));
                 i = i + 1 + end_pos + 1;
@@ -327,9 +347,12 @@ pub fn parse_inline(text: &str) -> Vec<Span<'static>> {
                 plain.clear();
             }
             let remaining: String = chars[i..].iter().collect();
-            if let Some(bracket_end) = remaining.find(']') {
+            if let Some(byte_pos) = remaining.find(']') {
+                let bracket_end = remaining[..byte_pos].chars().count();
                 if i + bracket_end + 1 < len && chars[i + bracket_end + 1] == '(' {
-                    if let Some(paren_end) = remaining[bracket_end + 2..].find(')') {
+                    let after_bracket: String = remaining[byte_pos + ']'.len_utf8()..].to_string();
+                    if let Some(paren_byte) = after_bracket.find(')') {
+                        let paren_end = after_bracket[..paren_byte].chars().count();
                         let link_text: String = chars[i + 1..i + bracket_end].iter().collect();
                         spans.push(Span::styled(
                             link_text,

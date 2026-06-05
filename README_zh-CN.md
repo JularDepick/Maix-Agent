@@ -139,7 +139,7 @@ maix-agent/
 
 ## 致谢
 - 感谢开源社区项目 [[DeepSeek-TUI]](https://github.com/Hmbown/DeepSeek-TUI) 和 [[OpenHanako]](https://github.com/liliMozi/openhanako) 为本项目提供了实现思路和参考规范。
-- 感谢 [[小米 MiMo-V2.5 系列开源 & Orbit 百万亿 Token 计划]]() 为本项目提供共计 **1600M TOKEN** 的大模型API服务赞助支持
+- 感谢 [[小米 MiMo-V2.5 系列开源 & Orbit 百万亿 Token 计划]]() 为本项目提供共计 **1600M 额度（credit）** 的大模型API服务赞助支持
   <img src="./.github/image/MiMo-V2.5-API-Support.png"/>
 - 感谢 [[DeepSeek开放平台]](https://platform.deepseek.com) 为本项目提供低价高质的大模型API服务支持
   <img src="./.github/image/DeepSeek-API-Support.png" width="50%"/>

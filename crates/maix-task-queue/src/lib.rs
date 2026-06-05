@@ -210,7 +210,9 @@ impl TaskQueue {
 
     /// Resume a suspended task.
     pub fn resume(&mut self, task_id: &str, at: InsertAt) -> Result<(), String> {
-        self.suspend(task_id)?; // Ensure it exists
+        if !self.id_index.contains_key(task_id) {
+            return Err(format!("task not found: {task_id}"));
+        }
         let idx = self.id_index[task_id];
         self.entries[idx].status = TaskStatus::Pending;
         self.reposition(task_id, at)?;
