@@ -140,10 +140,22 @@ pub struct AgentConfig {
     /// Auto-mode routing: per-turn cheap vs capable model selection.
     #[serde(default)]
     pub auto_mode: AutoModeConfig,
+    /// Maximum messages to retain before truncation.
+    #[serde(default = "default_max_messages")]
+    pub max_messages: usize,
+    /// Maximum output tokens per LLM response.
+    #[serde(default = "default_max_output_tokens")]
+    pub max_output_tokens: u32,
+    /// Character count for memory summary truncation.
+    #[serde(default = "default_summary_truncate_chars")]
+    pub summary_truncate_chars: usize,
 }
 
 fn default_max_tool_rounds() -> usize { 16 }
 fn default_context_threshold() -> f32 { 0.9 }
+fn default_max_messages() -> usize { 100 }
+fn default_max_output_tokens() -> u32 { 4096 }
+fn default_summary_truncate_chars() -> usize { 500 }
 
 impl Default for AgentConfig {
     fn default() -> Self {
@@ -152,6 +164,9 @@ impl Default for AgentConfig {
             context_threshold: 0.9,
             mode: AgentMode::default(),
             auto_mode: AutoModeConfig::default(),
+            max_messages: 100,
+            max_output_tokens: 4096,
+            summary_truncate_chars: 500,
         }
     }
 }

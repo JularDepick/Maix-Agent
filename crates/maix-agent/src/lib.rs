@@ -64,6 +64,20 @@ pub mod session;
 pub mod tool_selector;
 pub use session::Session;
 
+/// Estimate token count from text, with CJK-aware adjustment.
+/// English: ~4 chars/token. CJK: ~1.5 chars/token.
+fn estimate_tokens(text: &str) -> u64 {
+    if text.is_empty() {
+        return 0;
+    }
+    let total = text.chars().count() as f64;
+    let cjk = text.chars().filter(|c| {
+        matches!(c, '\u{4e00}'..='\u{9fff}' | '\u{3400}'..='\u{4dbf}' | '\u{f900}'..='\u{faff}' | '\u{20000}'..='\u{2a6df}')
+    }).count() as f64;
+    let non_cjk = total - cjk;
+    ((cjk / 1.5) + (non_cjk / 4.0)).ceil() as u64
+}
+
 // ---------------------------------------------------------------------------
 // Maix facade — central orchestrator for all entry points
 // ---------------------------------------------------------------------------
@@ -232,6 +246,9 @@ pub struct AgentConfig {
     pub system_prompt_template: String,
     pub mode: AgentMode,
     pub auto_memory_summary: bool,
+    pub max_messages: usize,
+    pub max_output_tokens: u32,
+    pub summary_truncate_chars: usize,
 }
 
 impl Default for AgentConfig {
@@ -242,6 +259,9 @@ impl Default for AgentConfig {
             system_prompt_template: DEFAULT_SYSTEM_PROMPT.into(),
             mode: AgentMode::Agent,
             auto_memory_summary: true,
+            max_messages: 100,
+            max_output_tokens: 4096,
+            summary_truncate_chars: 500,
         }
     }
 }
@@ -436,7 +456,7 @@ impl Agent {
         }];
 
         // Safety: truncate if messages exceed limit, avoiding orphan tool results
-        let max_messages = 100;
+        let max_messages = self.config.max_messages;
         let history = if self.session.messages.len() > max_messages {
             let truncated = &self.session.messages[self.session.messages.len() - max_messages..];
             // Skip leading Tool messages that lack their parent Assistant message
@@ -468,7 +488,7 @@ impl Agent {
         // Trigger 3: Tool output accumulation (> 25% of context)
         let tool_output_tokens: u64 = self.session.messages.iter()
             .filter(|m| m.role == Role::Tool)
-            .map(|m| m.content.text().unwrap_or("").len() as u64 / 4)
+            .map(|m| estimate_tokens(m.content.text().unwrap_or("")))
             .sum();
         let tool_trigger = tool_output_tokens as f64 > context_window * 0.25;
 
@@ -517,8 +537,8 @@ impl Agent {
                             &text[..end],
                             text.len()
                         );
-                        let old_tokens = text.len() as u64 / 4;
-                        let new_tokens = truncated.len() as u64 / 4;
+                        let old_tokens = estimate_tokens(text);
+                        let new_tokens = estimate_tokens(&truncated);
                         tokens_saved += old_tokens.saturating_sub(new_tokens);
                         msg.content = MessageContent::Text(truncated);
                     }
@@ -526,20 +546,17 @@ impl Agent {
             }
         }
 
-        // Strategy 2: Remove duplicate tool calls (same name + same args, keep last result)
+        // Strategy 2: Remove duplicate tool results (same tool_call_id, keep last result)
         let mut seen_tool_calls: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         let mut to_remove = Vec::new();
 
         for (i, msg) in self.session.messages.iter().enumerate() {
             if msg.role == Role::Tool {
-                if let Some(text) = msg.content.text() {
-                    // Create a key from the tool call context
-                    let key = format!("tool:{}:{}", msg.role as u8, text.len());
-                    if let Some(&prev_idx) = seen_tool_calls.get(&key) {
-                        // Mark the older duplicate for removal
+                if let Some(ref tool_call_id) = msg.tool_call_id {
+                    if let Some(&prev_idx) = seen_tool_calls.get(tool_call_id) {
                         to_remove.push(prev_idx);
                     }
-                    seen_tool_calls.insert(key, i);
+                    seen_tool_calls.insert(tool_call_id.clone(), i);
                 }
             }
         }
@@ -550,7 +567,7 @@ impl Agent {
         for &idx in to_remove.iter().rev() {
             if idx < self.session.messages.len() {
                 let removed = self.session.messages.remove(idx);
-                tokens_saved += removed.content.text().unwrap_or("").len() as u64 / 4;
+                tokens_saved += estimate_tokens(removed.content.text().unwrap_or(""));
             }
         }
 
@@ -637,13 +654,7 @@ impl Agent {
             .session
             .messages
             .iter()
-            .map(|m| {
-                m.content
-                    .text()
-                    .unwrap_or("")
-                    .len() as u64
-                    / 4
-            })
+            .map(|m| estimate_tokens(m.content.text().unwrap_or("")))
             .sum();
 
         tracing::info!(
@@ -812,7 +823,7 @@ impl Agent {
 
         // Add user message
         self.session
-            .add_message(Role::User, user_input, 1 + user_input.len() as u64 / 4);
+            .add_message(Role::User, user_input, 1 + estimate_tokens(user_input));
 
         let mut final_text = String::new();
         let mut final_usage = TokenUsage::default();
@@ -858,7 +869,7 @@ impl Agent {
                 },
                 tool_choice: None,
                 temperature: Some(0.7),
-                max_tokens: Some(4096),
+                max_tokens: Some(self.config.max_output_tokens),
                 model_override,
             };
 
@@ -1077,7 +1088,7 @@ impl Agent {
                 Role::Assistant,
                 &final_text,
                 reasoning_str,
-                final_text.len() as u64 / 4,
+                estimate_tokens(&final_text),
             );
 
             if let Some(ref tx) = tx {
@@ -1114,7 +1125,7 @@ impl Agent {
                 content: format!(
                     "User: {}\nAssistant: {}",
                     user_input,
-                    &final_text[..final_text.char_indices().nth(500).map(|(i, _)| i).unwrap_or(final_text.len())]
+                    &final_text[..final_text.char_indices().nth(self.config.summary_truncate_chars).map(|(i, _)| i).unwrap_or(final_text.len())]
                 ),
                 kind: MemoryKind::Episodic,
                 importance: 0.7,

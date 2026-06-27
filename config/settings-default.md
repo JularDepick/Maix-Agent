@@ -14,7 +14,14 @@
   "agent": {
     "max_tool_rounds": 16,
     "context_threshold": 0.9,
-    "mode": "agent"
+    "mode": "agent",
+    "auto_mode": {
+      "enabled": false,
+      "cheap_model": "gpt-4o-mini",
+      "cheap_provider": "",
+      "capable_model": "claude-sonnet-4-6",
+      "capable_provider": "anthropic"
+    }
   },
 
   "memory": {
@@ -23,7 +30,31 @@
   },
 
   "tools": {
-    "shell_enabled": false
+    "shell_enabled": false,
+    "mcp_servers": []
+  },
+
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "fs_write",
+        "command": "echo 'about to write $MAIX_FILE_PATH'",
+        "timeout_ms": 5000
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "fs_edit",
+        "command": "prettier --write $MAIX_FILE_PATH",
+        "timeout_ms": 30000
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "command": "notify-send 'Maix task complete'"
+      }
+    ]
   },
 
   "env": {}
@@ -47,6 +78,23 @@
 | `context_threshold` | number | `0.9` | 上下文压缩阈值 |
 | `mode` | string | `"agent"` | 默认模式: agent / plan / yolo |
 
+#### auto_mode — 自动模式路由
+
+每轮对话根据任务复杂度自动选择 cheap（快速）或 capable（强力）模型。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `enabled` | boolean | `false` | 启用自动模式路由 |
+| `cheap_model` | string | `""` | 简单任务使用的快速模型 |
+| `cheap_provider` | string | `""` | 快速模型的服务商（空则用默认） |
+| `capable_model` | string | `""` | 复杂任务使用的强力模型 |
+| `capable_provider` | string | `""` | 强力模型的服务商（空则用默认） |
+
+路由逻辑:
+- **Off** (简单): 问候、简短问题 → cheap_model
+- **High** (复杂): 编码、调试、多步任务 → capable_model
+- **Max** (深度推理): "think step by step"、架构设计 → capable_model
+
 ### memory — 记忆
 
 | 字段 | 类型 | 默认值 | 说明 |
@@ -59,6 +107,39 @@
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `shell_enabled` | boolean | `false` | 启用 Shell |
+| `mcp_servers` | array | `[]` | MCP 服务器配置 |
+
+#### mcp_servers 示例
+
+```json
+"mcp_servers": [
+  {
+    "name": "filesystem",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+    "env": {}
+  }
+]
+```
+
+### hooks — 生命周期钩子
+
+在工具执行前后运行用户自定义命令。
+
+| 钩子 | 触发时机 | 用途 |
+|------|----------|------|
+| `PreToolUse` | 工具执行前 | 拦截危险操作、日志记录 |
+| `PostToolUse` | 工具执行后 | 自动格式化、通知 |
+| `Stop` | Agent 循环结束 | 发送通知、清理 |
+
+环境变量:
+- `MAIX_TOOL_NAME` — 当前工具名
+- `MAIX_FILE_PATH` — 操作的文件路径（如适用）
+- `MAIX_TOOL_INPUT` — JSON 格式工具输入
+- `MAIX_TOOL_OUTPUT` — JSON 格式工具输出（仅 PostToolUse）
+- `MAIX_WORKING_DIR` — 工作目录
+
+PreToolUse hook 非零退出码会阻止工具执行。
 
 ### env — 环境变量覆盖
 

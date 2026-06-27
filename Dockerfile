@@ -13,6 +13,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
 COPY crates/ crates/
 COPY config/ config/
+COPY proto/ proto/
 
 RUN cargo build --release --bin maix
 

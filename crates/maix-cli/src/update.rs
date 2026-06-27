@@ -1,5 +1,7 @@
 //! Update checker — checks GitHub releases for new versions.
 
+#![allow(dead_code)]
+
 use std::time::{Duration, Instant};
 
 /// Update information.

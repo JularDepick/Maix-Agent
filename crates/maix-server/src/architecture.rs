@@ -3,6 +3,8 @@
 //! Defines custom multi-agent topologies beyond the 3 preset modes.
 //! Format: TOML-based, storable in DB.
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

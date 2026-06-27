@@ -114,10 +114,10 @@ maix-gateway
 # → http://localhost:26506/v1/architectures
 ```
 
-## Crates (14)
+## Crates (13)
 | Crate | Layer | Description |
 |-------|-------|-------------|
-| `maix-core` | Infrastructure | Shared types, config, errors, ModelRouter, Identity, Architecture DSL |
+| `maix-core` | Infrastructure | Shared types, config, errors, ModelRouter, Identity, Plugin, Permissions |
 | `maix-db` | Infrastructure | SQLite (rusqlite bundled), 7 tables, WAL mode |
 | `maix-provider` | Domain | LLM providers (DeepSeek, MiniMax, OpenAI-compatible) |
 | `maix-tools` | Domain | Built-in tools + MCP JSON-RPC client/server |
@@ -129,7 +129,7 @@ maix-gateway
 | `maix-cli` | Client | CLI client, gRPC Client |
 | `maix-tui` | Client | TUI terminal interface, gRPC Client |
 | `maix-gateway` | Client | HTTP gateway, gRPC → HTTP conversion |
-| `maix-server` | Core | maix.exe daemon, gRPC Server |
+| `maix-server` | Core | maix.exe daemon, gRPC Server, Architecture DSL |
 
 ## Tech Stack
 | Component | Technology |

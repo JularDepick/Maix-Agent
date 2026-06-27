@@ -38,6 +38,7 @@
 mod cli;
 mod commands;
 mod doctor;
+mod update;
 
 use clap::Parser;
 use cli::*;

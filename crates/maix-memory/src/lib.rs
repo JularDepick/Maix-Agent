@@ -169,8 +169,8 @@ impl FileMemoryStore {
         Ok(())
     }
 
-    /// BM25-like keyword scoring (upgraded from simple substring match).
-    fn keyword_score(entry: &MemoryEntry, query: &str) -> f32 {
+    /// BM25-like keyword scoring with dynamic average document length.
+    fn keyword_score(entry: &MemoryEntry, query: &str, avg_dl: f32) -> f32 {
         let content_lower = entry.content.to_lowercase();
         let query_lower = query.to_lowercase();
         let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
@@ -179,7 +179,6 @@ impl FileMemoryStore {
             return 0.0;
         }
 
-        let avg_dl = 200.0_f32;
         let k1 = 1.2_f32;
         let b = 0.75_f32;
         let mut score = 0.0_f32;
@@ -236,16 +235,29 @@ impl MemoryStore for FileMemoryStore {
         let mut scored: Vec<(f32, &MemoryEntry)> = Vec::new();
         let query_blank = query.trim().is_empty();
 
+        let avg_dl = if query_blank {
+            200.0_f32
+        } else {
+            let all_entries = self.episodic.values().flatten().chain(self.semantic.iter());
+            let mut total_len = 0u64;
+            let mut count = 0u64;
+            for e in all_entries {
+                total_len += e.content.len() as u64;
+                count += 1;
+            }
+            if count > 0 { total_len as f32 / count as f32 } else { 200.0_f32 }
+        };
+
         for entries in self.episodic.values() {
             for entry in entries {
-                let score = if query_blank { entry.importance } else { Self::keyword_score(entry, query) };
+                let score = if query_blank { entry.importance } else { Self::keyword_score(entry, query, avg_dl) };
                 if score > 0.0 || query_blank {
                     scored.push((score, entry));
                 }
             }
         }
         for entry in &self.semantic {
-            let score = if query_blank { entry.importance } else { Self::keyword_score(entry, query) };
+            let score = if query_blank { entry.importance } else { Self::keyword_score(entry, query, avg_dl) };
             if score > 0.0 || query_blank {
                 scored.push((score, entry));
             }

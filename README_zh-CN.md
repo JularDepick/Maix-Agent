@@ -1,7 +1,6 @@
 <div align="center">
 
 # Maix-Agent
-> 一个混合了多种人工智能架构和组件的、具有强大记忆能力的、支持编程化的AI-Agent实现。
 
 [![](https://img.shields.io/badge/Copyright-Maix--Agent-0066AA)](./COPYRIGHT)
 [![](https://img.shields.io/badge/License-AGPL--3.0--or--later-yellow)](./LICENSE)
@@ -11,6 +10,8 @@
 [[简体中文]](./README_zh-CN.md)
 
 </div>
+
+一个混合了多种人工智能架构和组件的、具有强大记忆能力的、支持编程化的AI-Agent实现。
 
 ---
 
@@ -84,10 +85,10 @@ maix-gateway
 # → http://localhost:26506/v1/architectures
 ```
 
-## Crates（14个）
+## Crates（13个）
 | Crate | 层级 | 说明 |
 |-------|------|------|
-| `maix-core` | 基础设施 | 共享类型、配置、错误、ModelRouter、Identity、Architecture DSL |
+| `maix-core` | 基础设施 | 共享类型、配置、错误、ModelRouter、Identity、Plugin、Permissions |
 | `maix-db` | 基础设施 | SQLite（rusqlite bundled），7张表，WAL模式 |
 | `maix-provider` | 领域层 | LLM提供商（DeepSeek、MiniMax、OpenAI兼容） |
 | `maix-tools` | 领域层 | 内置工具 + MCP JSON-RPC client/server |
@@ -99,7 +100,7 @@ maix-gateway
 | `maix-cli` | 客户端 | CLI客户端，gRPC Client |
 | `maix-tui` | 客户端 | TUI终端界面，gRPC Client |
 | `maix-gateway` | 客户端 | HTTP网关，gRPC → HTTP 转换 |
-| `maix-server` | 核心引擎 | maix.exe 守护进程，gRPC Server |
+| `maix-server` | 核心引擎 | maix.exe 守护进程，gRPC Server，Architecture DSL |
 
 ## 技术栈
 | 组件 | 技术 |

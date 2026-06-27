@@ -24,6 +24,7 @@
 //! - [`daemon`] — Daemonization and service management
 //! - [`shutdown`] — Graceful shutdown handling
 
+mod architecture;
 mod chat_stream;
 mod collaboration;
 mod daemon;

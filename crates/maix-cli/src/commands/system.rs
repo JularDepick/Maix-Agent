@@ -121,7 +121,7 @@ pub async fn cmd_update(check_only: bool) {
         }
     };
 
-    let checker = maix_core::update::UpdateChecker::new(current);
+    let checker = crate::update::UpdateChecker::new(current);
     match checker.parse_release_json(&body) {
         Some(info) => {
             println!("\nNew version available: v{} -> v{}", info.current, info.latest);

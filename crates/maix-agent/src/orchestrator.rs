@@ -1,6 +1,7 @@
 //! Multi-agent orchestration — roles, pool, orchestrator.
 
 use crate::{Agent, AgentConfig, AgentMode};
+use maix_core::MaixResult;
 use maix_memory::MemoryStore;
 use maix_provider::LLMProvider;
 use maix_task_queue::{AgentId, InsertAt, Task, TaskId, TaskQueue};
@@ -166,24 +167,21 @@ impl Orchestrator {
         provider: Arc<dyn LLMProvider>,
         role: AgentRole,
         working_dir: std::path::PathBuf,
-    ) -> AgentId {
+    ) -> MaixResult<AgentId> {
         let id = uuid::Uuid::new_v4().to_string();
         let mode = if role.auto_approve { AgentMode::Yolo } else { AgentMode::Agent };
+        let memory_dir = std::env::temp_dir().join(format!("maix-agent-memory-{id}"));
+        let memory = maix_memory::FileMemoryStore::new(memory_dir)?;
         let agent = Agent::new(
             AgentConfig { mode, ..Default::default() },
             provider,
             Arc::new(maix_tools::ToolRegistry::with_builtins()),
-            Box::new(
-                maix_memory::FileMemoryStore::new(
-                    std::env::temp_dir().join("maix-multi-agent-memory"),
-                )
-                .unwrap(),
-            ),
+            Box::new(memory),
             id.clone(),
             working_dir,
         );
         self.pool.add(AgentHandle { agent, role, agent_id: id.clone(), is_busy: false });
-        id
+        Ok(id)
     }
 
     pub async fn submit(&mut self, description: &str, input: &str, priority: u8, _role: Option<&str>) -> TaskId {

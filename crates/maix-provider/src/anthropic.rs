@@ -25,6 +25,7 @@ pub struct AnthropicProvider {
     model: String,
     base_url: String,
     capabilities: ProviderCapabilities,
+    retry_config: super::rate_limiter::RetryConfig,
 }
 
 impl AnthropicProvider {
@@ -42,6 +43,7 @@ impl AnthropicProvider {
                 supports_streaming: true,
                 max_tool_calls_per_turn: 5,
             },
+            retry_config: super::rate_limiter::RetryConfig::default(),
         }
     }
 
@@ -291,16 +293,32 @@ impl LLMProvider for AnthropicProvider {
         let body = self.build_body(&req, false);
         tracing::debug!(body = %body, "anthropic chat request");
 
-        let resp = self
-            .client
-            .post(self.messages_url())
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(super::http_err)?;
+        let api_key = self.api_key.clone();
+        let messages_url = self.messages_url();
+        let client = self.client.clone();
+
+        let resp = super::rate_limiter::with_retry(
+            &self.retry_config,
+            None,
+            || {
+                let client = client.clone();
+                let api_key = api_key.clone();
+                let messages_url = messages_url.clone();
+                let body = body.clone();
+                async move {
+                    client
+                        .post(&messages_url)
+                        .header("x-api-key", &api_key)
+                        .header("anthropic-version", "2023-06-01")
+                        .header("content-type", "application/json")
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(super::http_err)
+                }
+            },
+        )
+        .await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -371,17 +389,33 @@ impl LLMProvider for AnthropicProvider {
         let body = self.build_body(&req, true);
         tracing::debug!(body = %body, "anthropic chat stream request");
 
-        let resp = self
-            .client
-            .post(self.messages_url())
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("content-type", "application/json")
-            .header("accept", "text/event-stream")
-            .json(&body)
-            .send()
-            .await
-            .map_err(super::http_err)?;
+        let api_key = self.api_key.clone();
+        let messages_url = self.messages_url();
+        let client = self.client.clone();
+
+        let resp = super::rate_limiter::with_retry(
+            &self.retry_config,
+            None,
+            || {
+                let client = client.clone();
+                let api_key = api_key.clone();
+                let messages_url = messages_url.clone();
+                let body = body.clone();
+                async move {
+                    client
+                        .post(&messages_url)
+                        .header("x-api-key", &api_key)
+                        .header("anthropic-version", "2023-06-01")
+                        .header("content-type", "application/json")
+                        .header("accept", "text/event-stream")
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(super::http_err)
+                }
+            },
+        )
+        .await?;
 
         let status = resp.status();
         if !status.is_success() {

@@ -246,7 +246,7 @@ impl AstEditor {
         let patterns = self.definition_patterns();
 
         for (line_num, line) in source.lines().enumerate() {
-            for pattern in &patterns {
+            for pattern in patterns {
                 if let Some(mat) = pattern.find(line) {
                     // Extract the symbol name (last identifier in the match)
                     let matched = mat.as_str();
@@ -298,30 +298,45 @@ impl AstEditor {
         }
     }
 
-    fn definition_patterns(&self) -> Vec<regex::Regex> {
-        match self.language {
-            Language::Rust => vec![
+    fn definition_patterns(&self) -> &'static [regex::Regex] {
+        use std::sync::LazyLock;
+
+        static RUST_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
+            vec![
                 regex::Regex::new(r"(?:pub\s+)?(?:async\s+)?fn\s+(\w+)").unwrap(),
                 regex::Regex::new(r"(?:pub\s+)?struct\s+(\w+)").unwrap(),
                 regex::Regex::new(r"(?:pub\s+)?enum\s+(\w+)").unwrap(),
                 regex::Regex::new(r"(?:pub\s+)?trait\s+(\w+)").unwrap(),
                 regex::Regex::new(r"(?:pub\s+)?type\s+(\w+)").unwrap(),
-            ],
-            Language::TypeScript => vec![
+            ]
+        });
+        static TS_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
+            vec![
                 regex::Regex::new(r"(?:export\s+)?(?:async\s+)?function\s+(\w+)").unwrap(),
                 regex::Regex::new(r"(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=").unwrap(),
                 regex::Regex::new(r"(?:export\s+)?class\s+(\w+)").unwrap(),
                 regex::Regex::new(r"(?:export\s+)?interface\s+(\w+)").unwrap(),
-            ],
-            Language::Python => vec![
+            ]
+        });
+        static PY_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
+            vec![
                 regex::Regex::new(r"def\s+(\w+)").unwrap(),
                 regex::Regex::new(r"class\s+(\w+)").unwrap(),
-            ],
-            Language::Go => vec![
+            ]
+        });
+        static GO_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
+            vec![
                 regex::Regex::new(r"func\s+(?:\(\w+\s+\*?\w+\)\s+)?(\w+)").unwrap(),
                 regex::Regex::new(r"type\s+(\w+)").unwrap(),
                 regex::Regex::new(r"var\s+(\w+)").unwrap(),
-            ],
+            ]
+        });
+
+        match self.language {
+            Language::Rust => &RUST_PATTERNS,
+            Language::TypeScript => &TS_PATTERNS,
+            Language::Python => &PY_PATTERNS,
+            Language::Go => &GO_PATTERNS,
         }
     }
 

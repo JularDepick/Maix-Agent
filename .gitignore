@@ -10,10 +10,22 @@
 *.swo
 .claude/
 .startClaude.bat
+.startMiMo.bat
+.mimocode/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Windows debug symbols
+*.pdb
+
+# Performance profiling
+perf.data
+flamegraph.svg
+
+# Cargo local config
+.cargo/
 
 # Maix-Agent logs
 *.log

@@ -8,11 +8,20 @@ max_tool_rounds = 16
 context_threshold = 0.9
 mode = "agent"
 
+[agent.auto_mode]
+enabled = false
+cheap_model = ""
+cheap_provider = ""
+capable_model = ""
+capable_provider = ""
+
 [memory]
 dir = ""
+max_episodic_entries = 500
 
 [tools]
 shell_enabled = false
+mcp_servers = []
 
 [server]
 listen_addr = "127.0.0.1"

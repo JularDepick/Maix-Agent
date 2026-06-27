@@ -69,6 +69,7 @@ enum AgentState {
   AGENT_STATE_RESPONDING = 5;
   AGENT_STATE_UPDATING_MEMORY = 6;
   AGENT_STATE_ERRORED = 7;
+  AGENT_STATE_PAUSED = 8;
 }
 
 message TextDelta {

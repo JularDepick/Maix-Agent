@@ -13,7 +13,8 @@ use maix_agent::{Agent, AgentConfig, AgentEvent};
 use maix_agent::orchestrator::{Orchestrator, AgentRole, OrchestrationMode};
 use maix_core::proto::maix::core::v1::core_service_server::CoreService;
 use maix_core::proto::maix::core::v1 as pb;
-use maix_core::{json_to_prost_struct, prost_struct_to_json, prost_value_to_json, Architecture, Config, IdentityManager};
+use maix_core::{json_to_prost_struct, prost_struct_to_json, prost_value_to_json, Config, IdentityManager};
+use crate::architecture::{Architecture, TopologyType};
 use maix_memory::{FileMemoryStore, MemoryStore, SharedMemoryProxy};
 use maix_monitor::{EventBus, Monitor};
 use maix_provider::LLMProvider;
@@ -299,6 +300,10 @@ impl CoreService for MaixCoreService {
                     res
                 }
                 _ = run_cancel.cancelled() => {
+                    Err(maix_core::MaixError::Cancelled)
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(300)) => {
+                    tracing::warn!("agent run timed out after 5 minutes for session");
                     Err(maix_core::MaixError::Cancelled)
                 }
             }
@@ -1077,8 +1082,8 @@ impl CoreService for MaixCoreService {
 
         // Map topology to orchestration mode
         let mode = match arch.detect_topology() {
-            maix_core::TopologyType::Debate => OrchestrationMode::Debate,
-            maix_core::TopologyType::Router | maix_core::TopologyType::Parallel => {
+            TopologyType::Debate => OrchestrationMode::Debate,
+            TopologyType::Router | TopologyType::Parallel => {
                 OrchestrationMode::Collaborative
             }
             _ => OrchestrationMode::Hierarchical,
@@ -1102,7 +1107,10 @@ impl CoreService for MaixCoreService {
                     max_iter: node.max_iterations.unwrap_or(10),
                     auto_approve: true,
                 };
-                orch.add_agent(provider.clone(), role, working_dir.clone());
+                if let Err(e) = orch.add_agent(provider.clone(), role, working_dir.clone()) {
+                    tracing::warn!("Failed to add agent for node {}: {e}", node.id);
+                    continue;
+                }
             }
 
             // Notify: execution started
