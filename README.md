@@ -2,9 +2,10 @@
 
 # Maix-Agent
 
-[![](https://img.shields.io/badge/Copyright-Maix--Agent-0066AA)](./COPYRIGHT)
-[![](https://img.shields.io/badge/License-AGPL--3.0--or--later-yellow)](./LICENSE)
-[![](https://img.shields.io/badge/Commercial-Closed--Source_Paid-red)](./COMMERCIAL.md)
+[![Version](https://img.shields.io/badge/Version-v1.0.1-green)](https://github.com/JularDepick/Maix-Agent/tree/v1.0.1)
+[![Copyright](https://img.shields.io/badge/Copyright-Maix--Agent-0066AA)](./COPYRIGHT)
+[![License](https://img.shields.io/badge/License-AGPL--3.0--or--later-orange)](./LICENSE)
+[![Commercial](https://img.shields.io/badge/Commercial-Closed--Source_Paid-red)](./COMMERCIAL.md)
 
 [[English]](./README.md)
 [[简体中文]](./README_zh-CN.md)
