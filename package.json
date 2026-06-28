@@ -1,6 +1,6 @@
 {
   "name": "maix-agent",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Maix-Agent - AI Agent with TUI and Backend separation",
   "type": "module",
   "pnpm": {

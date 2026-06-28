@@ -135,7 +135,7 @@ export class MCPClient {
       },
       clientInfo: {
         name: 'maix-agent',
-        version: '1.0.0',
+        version: '1.0.1',
       },
     });
 

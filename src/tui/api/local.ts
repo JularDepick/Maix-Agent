@@ -69,7 +69,7 @@ export class LocalAdapter implements BackendAPI {
   }
 
   getModeManager(): ModeManagerAPI {
-    const mm = new ModeManager();
+    const mm = this.agent.getModeManager();
     return {
       getCurrentMode: async () => mm.getCurrentMode() as AgentMode,
       getAvailableModes: async () => mm.getAvailableModes() as AgentMode[],

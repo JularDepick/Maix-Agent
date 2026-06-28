@@ -31,7 +31,7 @@ const fixTerminalKitPlugin = {
 };
 
 await esbuild.build({
-  entryPoints: [path.join(rootDir, 'src', 'tui', 'app.ts')],
+  entryPoints: [path.join(rootDir, 'src', 'tui', 'main.ts')],
   bundle: true,
   outfile: path.join(outDir, 'index.mjs'),
   platform: 'node',

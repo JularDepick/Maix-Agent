@@ -33,7 +33,19 @@ export class MemoryStore {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    const SQL = await initSqlJs();
+    const embeddedWasm = await this.loadWasm();
+    const wasmPath = this.locateWasm();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const config: any = {};
+    if (embeddedWasm) {
+      config.wasmBinary = embeddedWasm;
+      config.locateFile = () => 'sql-wasm.wasm';
+    } else if (wasmPath) {
+      config.locateFile = () => wasmPath;
+    }
+
+    const SQL = await initSqlJs(config);
 
     if (fs.existsSync(this.dbPath)) {
       const buffer = fs.readFileSync(this.dbPath);
@@ -93,6 +105,30 @@ export class MemoryStore {
     this.save();
     this.initialized = true;
     logger.info(`Memory store initialized: ${this.dbPath}`);
+  }
+
+  private locateWasm(): string | null {
+    const candidates = [
+      path.join(path.dirname(this.dbPath), 'sql-wasm.wasm'),
+      path.join(process.cwd(), 'sql-wasm.wasm'),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        logger.debug(`Found sql-wasm.wasm at: ${p}`);
+        return p;
+      }
+    }
+    return null;
+  }
+
+  private async loadWasm(): Promise<Uint8Array | null> {
+    try {
+      const { getSqlWasmBuffer } = await import('./sql-wasm-embedded.js');
+      logger.debug('Using embedded sql-wasm.wasm');
+      return new Uint8Array(getSqlWasmBuffer());
+    } catch {
+      return null;
+    }
   }
 
   private save(): void {

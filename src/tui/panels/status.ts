@@ -29,6 +29,9 @@ export class StatusPanel {
 
   toggle(): void {
     this.visible = !this.visible;
+    if (this.visible) {
+      this.render();
+    }
   }
 
   isVisible(): boolean {

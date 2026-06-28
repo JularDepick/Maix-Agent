@@ -3,6 +3,7 @@ import { BaseProvider } from '../provider/base.js';
 import { SessionManager } from './session.js';
 import { MemoryStore } from './memory.js';
 import { ContextManager } from './context.js';
+import { ModeManager } from './modes.js';
 import { Message, AgentEvent, ToolCall, ToolResult, TokenUsage } from '../core/types.js';
 import { logger } from '../core/logger.js';
 import { ToolRegistry } from '../tools/registry.js';
@@ -24,6 +25,7 @@ export class Agent {
   private memory: MemoryStore;
   private tools: ToolRegistry;
   private context: ContextManager;
+  private modeManager: ModeManager;
   private systemPrompt: string;
   private workingDir: string;
   private sessions: SessionManager;
@@ -36,6 +38,7 @@ export class Agent {
     this.systemPrompt = config.systemPrompt || this.getDefaultSystemPrompt();
     this.sessions = new SessionManager();
     this.context = new ContextManager(config.maxContextTokens || 128000);
+    this.modeManager = new ModeManager();
   }
 
   getId(): string {
@@ -287,6 +290,10 @@ Always be helpful, concise, and accurate. When working with files, use the provi
 
   getTools(): ToolRegistry {
     return this.tools;
+  }
+
+  getModeManager(): ModeManager {
+    return this.modeManager;
   }
 
   switchProvider(provider: BaseProvider): void {

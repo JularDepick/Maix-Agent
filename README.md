@@ -33,13 +33,16 @@ src/
 │   └── monitor/            Core Layer: WebSocket monitoring service
 ├── tui/                    Frontend TUI
 │   ├── app.ts              TUI main application
+│   ├── terminal.ts         Terminal extensions (colors)
 │   ├── api/                API adapter layer
 │   │   ├── types.ts        Frontend type definitions (BackendAPI interface)
 │   │   ├── local.ts        Local direct connection adapter
 │   │   ├── http.ts         HTTP API adapter
 │   │   └── ws.ts           WebSocket adapter
+│   ├── components/         Reserved component directory
 │   ├── panels/             Status panels
 │   ├── themes/             Theme management (dark/light)
+│   ├── types/              Type declarations (terminal-kit)
 │   └── utils/              Utilities (keybindings, Markdown rendering)
 
 scripts/              Build scripts
@@ -85,6 +88,8 @@ graph TD
 - Programmable topology: TOML DSL for execution flow definition
 - Real-time agent work status monitoring (EventBus + WebSocket)
 - TUI status panel: real-time display of agent status, task queue, token consumption
+- TUI configuration command (/config): start without config, configure API Key in TUI
+- Single-file distribution: sql-wasm.wasm embedded in binary, no external dependencies
 
 ## Quick Start
 
@@ -114,7 +119,7 @@ pnpm build
 pnpm esbuild
 ```
 
-Build output is in `build/` directory. For distribution, include the executable + `sql-wasm.wasm` + `.env`.
+Build output is in `build/` directory. For distribution, include the executable + `.env`.
 
 ## Tech Stack
 
@@ -144,9 +149,12 @@ Maix-Agent/
 │   │   └── monitor/        #     Monitoring service
 │   └── tui/                #   Frontend TUI
 │       ├── app.ts          #     TUI main application
+│       ├── terminal.ts     #     Terminal extensions (colors)
 │       ├── api/            #     API adapter layer
+│       ├── components/     #     Reserved component directory
 │       ├── panels/         #     Status panels
 │       ├── themes/         #     Theme management
+│       ├── types/          #     Type declarations (terminal-kit)
 │       └── utils/          #     Utilities
 ├── scripts/                # Build scripts
 │   ├── bunbuild-*-windows_x64.mjs  # Bun cross-compilation (Windows x64)
@@ -176,9 +184,7 @@ Maix-Agent/
 - [[Apply for Commercial License]](./COMMERCIAL.md)
 
 ## Acknowledgements
-- Thanks to the open-source community projects [[MiMoCode]](https://github.com/Hmbown/DeepSeek-TUI) and [[OpenHanako]](https://github.com/liliMozi/openhanako) for providing implementation ideas and reference standards for this project.
-- Thanks to [[Xiaomi MiMo-V2.5 Open Source & Orbit 100T Token Program]]() for sponsoring this project with a total of **1600M credits** of LLM API service support
-  <img src="./.github/image/MiMo-V2.5-API-Support.png"/>
+- Thanks to the open-source community projects [[MiMoCode]](https://github.com/XiaomiMiMo/MiMo-Code) and [[OpenHanako]](https://github.com/liliMozi/openhanako) for providing implementation ideas and reference standards for this project.
+- Thanks to [[Xiaomi MiMo-V2.5 Open Source & Orbit 100T Token Program]](https://platform.xiaomimimo.com/) for sponsoring this project with over **500M TOKEN** of LLM API service support
 - Thanks to [[DeepSeek Open Platform]](https://platform.deepseek.com) for providing high-quality, cost-effective LLM API service support for this project
-  <img src="./.github/image/DeepSeek-API-Support.png" width="50%"/>
-- Thanks to [[Claude Code]](https://code.claude.com) for providing AI Agent programming support for this project
+- Thanks to [[Claude Code]](https://code.claude.com) and [[MiMoCode]](https://github.com/XiaomiMiMo/MiMo-Code) for providing AI Agent programming support for this project

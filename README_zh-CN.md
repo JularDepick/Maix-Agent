@@ -2,9 +2,10 @@
 
 # Maix-Agent
 
-[![](https://img.shields.io/badge/Copyright-Maix--Agent-0066AA)](./COPYRIGHT)
-[![](https://img.shields.io/badge/License-AGPL--3.0--or--later-yellow)](./LICENSE)
-[![](https://img.shields.io/badge/Commercial-Closed--Source_Paid-red)](./COMMERCIAL.md)
+[![Version](https://img.shields.io/badge/Version-v1.0.1-green)](https://github.com/JularDepick/Maix-Agent/tree/v1.0.1)
+[![Copyright](https://img.shields.io/badge/Copyright-Maix--Agent-0066AA)](./COPYRIGHT)
+[![License](https://img.shields.io/badge/License-AGPL--3.0--or--later-orange)](./LICENSE)
+[![Commercial](https://img.shields.io/badge/Commercial-Closed--Source_Paid-red)](./COMMERCIAL.md)
 
 [[English]](./README.md)
 [[简体中文]](./README_zh-CN.md)
@@ -33,13 +34,16 @@ src/
 │   └── monitor/          核心层：WebSocket 监控服务
 ├── tui/                  前端 TUI
 │   ├── app.ts            TUI 主应用
+│   ├── terminal.ts       终端扩展（颜色）
 │   ├── api/              API 适配层
 │   │   ├── types.ts      前端类型定义（BackendAPI 接口）
 │   │   ├── local.ts      本地直连适配器
 │   │   ├── http.ts       HTTP API 适配器
 │   │   └── ws.ts         WebSocket 适配器
+│   ├── components/       预留组件目录
 │   ├── panels/           状态面板
 │   ├── themes/           主题管理（dark/light）
+│   ├── types/            类型声明（terminal-kit）
 │   └── utils/            工具函数（快捷键、Markdown 渲染）
 
 scripts/                构建脚本
@@ -85,6 +89,8 @@ graph TD
 - 可编程拓扑：TOML DSL 定义执行流程
 - 实时Agent工作状态查看（EventBus + WebSocket）
 - TUI状态面板：实时显示Agent状态、任务队列、Token消耗
+- TUI配置命令（/config）：缺少配置时仍可启动，在TUI内配置API Key
+- 单文件分发：sql-wasm.wasm嵌入二进制，无需外部依赖
 
 ## 快速开始
 
@@ -114,7 +120,7 @@ pnpm build
 pnpm esbuild
 ```
 
-构建产物位于 `build/` 目录，分发时需携带可执行文件 + `sql-wasm.wasm` + `.env`。
+构建产物位于 `build/` 目录，分发时需携带可执行文件 + `.env`。
 
 ## 技术栈
 
@@ -144,9 +150,12 @@ Maix-Agent/
 │   │   └── monitor/        #     监控服务
 │   └── tui/                #   前端 TUI
 │       ├── app.ts          #     TUI 主应用
+│       ├── terminal.ts     #     终端扩展（颜色）
 │       ├── api/            #     API 适配层
+│       ├── components/     #     预留组件目录
 │       ├── panels/         #     状态面板
 │       ├── themes/         #     主题管理
+│       ├── types/          #     类型声明（terminal-kit）
 │       └── utils/          #     工具函数
 ├── scripts/                # 构建脚本
 │   ├── bunbuild-*-windows_x64.mjs  # Bun 交叉编译（Windows x64）

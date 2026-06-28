@@ -9,12 +9,27 @@ import os from 'os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function getExeDir(): string {
+  try {
+    if (typeof globalThis !== 'undefined' && 'Bun' in globalThis) {
+      const bunMain = (globalThis as Record<string, unknown>).Bun;
+      if (bunMain && typeof bunMain === 'object' && 'main' in bunMain) {
+        return path.dirname((bunMain as { main: string }).main);
+      }
+    }
+  } catch {}
+  return path.dirname(process.argv[0] || process.cwd());
+}
+
+const EXE_DIR = getExeDir();
+
 const ENV_PREFIX = 'MAIX_AGENT_';
 
 const CONFIG_PRIORITY = [
   { name: 'user', path: path.join(os.homedir(), '.maix-agent', 'config.env') },
   { name: 'project', path: path.join(process.cwd(), '.maix-agent', 'config.env') },
-  { name: 'env', path: path.join(process.cwd(), '.env') },
+  { name: 'exe', path: path.join(EXE_DIR, '.env') },
+  { name: 'cwd', path: path.join(process.cwd(), '.env') },
 ];
 
 function loadEnvFiles(): void {
@@ -24,7 +39,6 @@ function loadEnvFiles(): void {
       logger.debug(`Loaded config from ${source.name}: ${source.path}`);
     }
   }
-  dotenvConfig({ path: path.join(__dirname, '..', '.env'), override: true });
 }
 
 function getEnv(key: string, defaultValue: string): string;
@@ -99,7 +113,7 @@ export function loadConfig(): AppConfig {
 
   const enableModelRouter = getEnv('ENABLE_MODEL_ROUTER', 'false') === 'true';
   const enableMCP = getEnv('ENABLE_MCP', 'false') === 'true';
-  const skillsDir = getEnv('SKILLS_DIR', path.join(__dirname, '..', 'skills'));
+  const skillsDir = getEnv('SKILLS_DIR', path.join(EXE_DIR, 'skills'));
   const wsPort = parseInt(getEnv('WS_PORT', '8765'), 10);
 
   let mcpServers: Record<string, { command: string; args?: string[] }> = {};
@@ -112,10 +126,15 @@ export function loadConfig(): AppConfig {
     }
   }
 
+  const dbPath = getEnv('DB_PATH');
+  const resolvedDbPath = dbPath
+    ? path.resolve(EXE_DIR, dbPath)
+    : path.join(EXE_DIR, 'data', 'maix.db');
+
   return {
     providers,
     defaultProvider,
-    dbPath: getEnv('DB_PATH', path.join(__dirname, '..', 'data', 'maix.db')),
+    dbPath: resolvedDbPath,
     logLevel: logLevel as 'debug' | 'info' | 'warn' | 'error',
     defaultMode,
     enableModelRouter,

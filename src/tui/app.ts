@@ -1,14 +1,19 @@
 import { ThemeManager } from './themes/index.js';
 import { StatusPanel } from './panels/status.js';
 import { BackendAPI, Session, AgentEvent, AgentMode, ToolCall } from './api/types.js';
+import { AppConfig } from '../backend/core/config.js';
 import { term } from './terminal.js';
+import fs from 'fs';
+import path from 'path';
 
 export interface TuiConfig {
   backend: BackendAPI;
+  config: AppConfig | null;
 }
 
 export class TuiApp {
   private backend: BackendAPI;
+  private appConfig: AppConfig | null;
   private theme: ThemeManager;
   private statusPanel: StatusPanel;
   private inputBuffer: string = '';
@@ -24,11 +29,17 @@ export class TuiApp {
 
   constructor(config: TuiConfig) {
     this.backend = config.backend;
+    this.appConfig = config.config;
     this.theme = new ThemeManager();
     this.statusPanel = new StatusPanel(this.theme);
   }
 
   async start(): Promise<void> {
+    const cols = Math.max(process.stdout.columns || 80, 1);
+    const rows = Math.max(process.stdout.rows || 24, 1);
+    if (!term.width || term.width <= 0) term.width = cols;
+    if (!term.height || term.height <= 0) term.height = rows;
+
     term.clear();
     term.grabInput(true);
     term.hideCursor(false);
@@ -60,7 +71,7 @@ export class TuiApp {
     term.colorHex(theme.accent);
     term.bold(' Maix-Agent TUI ');
     term.colorHex(theme.dim);
-    term(' v1.0.0');
+    term(' v1.0.1');
     term.eraseLine();
   }
 
@@ -98,7 +109,7 @@ export class TuiApp {
     if (!session) return;
 
     const startRow = 3;
-    const endRow = term.height - 3;
+    const endRow = (Number(term.height) || 24) - 3;
 
     for (let i = startRow; i <= endRow; i++) {
       term.moveTo(1, i);
@@ -128,7 +139,7 @@ export class TuiApp {
       }
 
       const isFolded = this.foldedMessages.get(msg.id) !== false;
-      const lines = this.wrapText(msg.content, term.width - 8);
+      const lines = this.wrapText(msg.content, (Number(term.width) || 80) - 8);
 
       if (lines.length > 50 && isFolded) {
         for (let i = 0; i < 5; i++) {
@@ -157,11 +168,16 @@ export class TuiApp {
 
   private renderInput(): void {
     const theme = this.theme.getTheme();
-    const inputRow = term.height - 1;
+    const inputRow = Math.max((Number(term.height) || 24) - 1, 1);
+    const width = Math.max(Number(term.width) || 80, 1);
 
     term.moveTo(1, inputRow - 1);
     term.bgColorHex(theme.border);
-    term('─'.repeat(term.width));
+    try {
+      term('─'.repeat(width));
+    } catch {
+      term('─'.repeat(80));
+    }
     term.eraseLine();
 
     term.moveTo(1, inputRow);
@@ -486,6 +502,9 @@ export class TuiApp {
           this.renderInput();
         }
         break;
+      case 'config':
+        await this.handleConfig(args);
+        break;
       case 'exit':
       case 'quit':
         this.cleanup();
@@ -495,6 +514,94 @@ export class TuiApp {
         term(`Unknown command: ${cmd}\n`);
         term.colorHex(theme.dim);
         term('Type /help for available commands\n');
+    }
+  }
+
+  private async handleConfig(args: string[]): Promise<void> {
+    const theme = this.theme.getTheme();
+    const subcmd = args[0] || 'status';
+
+    switch (subcmd) {
+      case 'status':
+        if (this.appConfig) {
+          term.colorHex(theme.success);
+          term('Backend configured\n');
+          term.colorHex(theme.fg);
+          term(`  Provider: ${this.appConfig.defaultProvider}\n`);
+          term(`  Model: ${await this.backend.getProvider().getModel()}\n`);
+        } else {
+          term.colorHex(theme.warn);
+          term('Backend not configured\n');
+          term.colorHex(theme.dim);
+          term('  Use /config set <key> <value> to configure\n');
+        }
+        break;
+      case 'set':
+        if (args.length < 3) {
+          term.colorHex(theme.error);
+          term('Usage: /config set <key> <value>\n');
+          term.colorHex(theme.dim);
+          term('Keys: OPENAI_API_KEY, ANTHROPIC_API_KEY, DEFAULT_PROVIDER\n');
+          return;
+        }
+        const key = args[1];
+        const value = args.slice(2).join(' ');
+        this.setEnvValue(key, value);
+        term.colorHex(theme.success);
+        term(`Set ${key} = ${key.includes('KEY') ? '***' : value}\n`);
+        term.colorHex(theme.dim);
+        term('Restart to apply changes\n');
+        break;
+      case 'show':
+        this.showEnvFile();
+        break;
+      default:
+        term.colorHex(theme.error);
+        term('Usage: /config [status|set|show]\n');
+    }
+  }
+
+  private setEnvValue(key: string, value: string): void {
+    const envPath = path.join(process.cwd(), '.env');
+    let content = '';
+    if (fs.existsSync(envPath)) {
+      content = fs.readFileSync(envPath, 'utf-8');
+    }
+
+    const prefix = key.startsWith('MAIX_AGENT_') ? '' : 'MAIX_AGENT_';
+    const fullKey = `${prefix}${key}`;
+
+    const regex = new RegExp(`^${fullKey}=.*$`, 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, `${fullKey}=${value}`);
+    } else {
+      content += `\n${fullKey}=${value}`;
+    }
+
+    fs.writeFileSync(envPath, content.trim() + '\n');
+  }
+
+  private showEnvFile(): void {
+    const theme = this.theme.getTheme();
+    const envPath = path.join(process.cwd(), '.env');
+    if (!fs.existsSync(envPath)) {
+      term.colorHex(theme.warn);
+      term('.env file not found\n');
+      return;
+    }
+    const content = fs.readFileSync(envPath, 'utf-8');
+    term.colorHex(theme.fg);
+    for (const line of content.split('\n')) {
+      if (line.startsWith('#') || !line.trim()) {
+        term.colorHex(theme.dim);
+      } else if (line.includes('KEY')) {
+        const parts = line.split('=');
+        term(`${parts[0]}=***\n`);
+        term.colorHex(theme.fg);
+      } else {
+        term.colorHex(theme.fg);
+        term(`${line}\n`);
+      }
     }
   }
 
@@ -513,6 +620,7 @@ export class TuiApp {
     term('  /reasoning      - Toggle reasoning display\n');
     term('  /mode [name]    - Switch mode (plan/agent/yolo)\n');
     term('  /status         - Toggle status panel\n');
+    term('  /config [cmd]   - Configure settings (status/set/show)\n');
     term('  /exit           - Exit application\n');
     term('\n');
     term.colorHex(theme.dim);
@@ -578,7 +686,7 @@ export class TuiApp {
 
     let lines = 0;
     for (const msg of session.messages) {
-      lines += Math.ceil(msg.content.length / (term.width - 8)) + 2;
+      lines += Math.ceil(msg.content.length / ((Number(term.width) || 80) - 8)) + 2;
     }
     return lines;
   }
