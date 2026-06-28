@@ -1,7 +1,6 @@
 <div align="center">
 
 # Maix-Agent
-> A hybrid AI-Agent implementation with multiple AI architectures, powerful memory capabilities, and programmable features.
 
 [![](https://img.shields.io/badge/Copyright-Maix--Agent-0066AA)](./COPYRIGHT)
 [![](https://img.shields.io/badge/License-AGPL--3.0--or--later-yellow)](./LICENSE)
@@ -12,165 +11,174 @@
 
 </div>
 
+A hybrid AI-Agent implementation with multiple AI architectures, powerful memory capabilities, and programmable features.
+
 ---
 
 ## Architecture
 
+Backend and TUI are fully decoupled, communicating through an API adapter layer. Build scripts choose the coupling method:
+- `tui-shell`: TUI connects to remote Backend via HTTP/WebSocket
+- `backend-solo`: Backend runs independently, exposing API for any client
+- `tui-with-backend`: TUI and Backend bundled together, local direct connection
+
 ```
-maix.exe  (Core engine, gRPC Server, Daemon)
-  ├── maix-cli.exe      CLI client (stateless, gRPC)
-  ├── maix-tui.exe      TUI client (interactive, gRPC)
-  └── maix-gateway.exe  HTTP gateway (REST/SSE/WS, gRPC)
+src/
+├── backend/                Backend core
+│   ├── core/               Core Layer: type definitions, config loading, error hierarchy, logger, event bus
+│   ├── provider/           Core Layer: LLM Provider abstraction & implementations (OpenAI / Anthropic), model routing
+│   ├── agent/              Core Layer: Agent main loop, session management, memory store, context compaction, mode system, task queue, multi-agent collaboration
+│   ├── tools/              Core Layer: tool system (file ops, commands, search, approval mechanism)
+│   ├── mcp/                Core Layer: MCP protocol client
+│   └── monitor/            Core Layer: WebSocket monitoring service
+├── tui/                    Frontend TUI
+│   ├── app.ts              TUI main application
+│   ├── api/                API adapter layer
+│   │   ├── types.ts        Frontend type definitions (BackendAPI interface)
+│   │   ├── local.ts        Local direct connection adapter
+│   │   ├── http.ts         HTTP API adapter
+│   │   └── ws.ts           WebSocket adapter
+│   ├── panels/             Status panels
+│   ├── themes/             Theme management (dark/light)
+│   └── utils/              Utilities (keybindings, Markdown rendering)
+
+scripts/              Build scripts
+├── bunbuild-*-windows_x64.mjs   Bun cross-compilation (Windows x64)
+└── esbuild-*.mjs                esbuild bundling
+
+build/                Bun compiled binaries
+dist/                 esbuild bundled output
 ```
 
-The core engine `maix.exe` runs as a daemon. All clients are stateless and communicate via gRPC.
+```mermaid
+graph TD
+    TUI[tui/ Frontend] --> API[api/ Adapter]
+    API -->|local| Backend[backend/ Backend]
+    API -->|http| Remote[Remote Backend]
+    API -->|ws| Remote
+    Backend --> Agent[agent/ Core]
+    Agent --> Provider[provider/ Core]
+    Agent --> Tools[tools/ Core]
+    Agent --> Core[core/ Core]
+    Provider --> Core
+    Tools --> Core
+```
 
 ## Features
-- Single Agent operations for local tools (fs_read, fs_write, shell_exec, web_fetch)
-- Multi-Agent parallel/async collaboration (Hierarchical / Collaborative / Debate)
-- Three modes: Plan / Agent / YOLO with free switching
-- Human-like long-term memory system (Episodic / Semantic / Working / SQLite storage)
-- Multi-model routing: auto-detect task category, select best LLM
-- Programmable single-Agent architecture (TOML DSL, 3 built-in topologies)
-- Dynamic task queue: priority, dependencies, position insertion
-- Skills system: maix-skill.toml + SKILL.md dual format
-- Identity/personality system: natural language identity description, persistent storage
-- Programmable multi-Agent collaboration topologies
-- Real-time Agent work status viewing (EventBus + WebSocket)
-- MCP protocol: JSON-RPC 2.0 client/server
+
+### Implemented
+- Single-agent local tool operations (fs_read, fs_write, fs_edit, shell_exec, grep, glob)
+- Human-like long-term memory system (Episodic / Semantic / Working)
+- Multi-provider support: OpenAI / Anthropic with streaming
+- Multi-session management with persistent storage
+- Tool call approval mechanism (manual/auto-approve)
+- Context window management with automatic compaction
+- Theme switching (dark / light)
+- Markdown terminal rendering
+- Plan / Agent / YOLO three modes freely switchable
+- Multi-model routing: auto-detect task category, select optimal LLM
+- Dynamic task queue: priority, dependency, positional insertion
+- Identity/persona system: natural language identity definition with persistent storage
+- Skill system: maix-skill.toml + SKILL.md dual format
+- MCP protocol: JSON-RPC 2.0 client
+- Multi-agent collaboration (Hierarchical / Collaborative / Debate)
+- Programmable topology: TOML DSL for execution flow definition
+- Real-time agent work status monitoring (EventBus + WebSocket)
+- TUI status panel: real-time display of agent status, task queue, token consumption
 
 ## Quick Start
 
-### Prerequisites
-- Windows / Linux / macOS
-- DeepSeek API Key (or other OpenAI-compatible provider)
+```bash
+# Clone repository
+git clone https://github.com/JularDepick/Maix-Agent.git
+cd Maix-Agent
 
-### Configuration
+# Install dependencies
+pnpm install
 
-Create `~/.maix/settings.json`:
+# Configure environment
+cp .env.example .env
+# Edit .env to fill in your API Key
 
-```json
-{
-  "providers": {
-    "anthropic": {
-      "api_key": "sk-ant-xxx",
-      "model": "claude-sonnet-4-20250514"
-    },
-    "openai": {
-      "api_key": "sk-xxx",
-      "model": "gpt-4o"
-    },
-    "deepseek": {
-      "api_key": "sk-xxx",
-      "model": "deepseek-chat",
-      "base_url": "https://api.deepseek.com/v1"
-    }
-  }
-}
+# Build
+pnpm build
 ```
 
-Or use environment variables:
+## Build
 
 ```bash
-export MAIX_PROVIDERS_DEEPSEEK_API_KEY=sk-your-key
+# Bun cross-compilation (generate Windows executable)
+pnpm build
+
+# esbuild bundling (output Node.js runnable ESM)
+pnpm esbuild
 ```
 
-### CLI
-```bash
-# Set API Key
-set MAIX_PROVIDERS_DEEPSEEK_API_KEY=sk-your-key
-
-# One-time Q&A
-maix -m deepseek ask "Explain Rust ownership"
-
-# Interactive chat
-maix chat
-
-# Identity management
-maix identity list
-maix identity use Architect
-
-# Memory management
-maix memory list
-maix memory search "keywords"
-
-# Architecture DSL
-maix architecture list
-maix architecture show sequential
-```
-
-### TUI
-```bash
-# Double-click maix-tui.exe to start config wizard
-# Or run from terminal:
-maix-tui
-```
-
-### HTTP Gateway
-```bash
-maix-gateway
-# → http://localhost:26506/health
-# → http://localhost:26506/v1/identities
-# → http://localhost:26506/v1/architectures
-```
-
-## Crates (13)
-| Crate | Layer | Description |
-|-------|-------|-------------|
-| `maix-core` | Infrastructure | Shared types, config, errors, ModelRouter, Identity, Plugin, Permissions |
-| `maix-db` | Infrastructure | SQLite (rusqlite bundled), 7 tables, WAL mode |
-| `maix-provider` | Domain | LLM providers (DeepSeek, MiniMax, OpenAI-compatible) |
-| `maix-tools` | Domain | Built-in tools + MCP JSON-RPC client/server |
-| `maix-memory` | Domain | MemoryStore trait, FileMemoryStore, SqliteMemoryStore |
-| `maix-task-queue` | Domain | Priority/dependency/position queue with DB persistence |
-| `maix-skills` | Domain | Skills loading/installing/enabling, TOML + Markdown dual format |
-| `maix-monitor` | Domain | EventBus (256 channels), Monitor, AgentEvent tracking |
-| `maix-agent` | Application | Agent runtime + multi-Agent orchestration |
-| `maix-cli` | Client | CLI client, gRPC Client |
-| `maix-tui` | Client | TUI terminal interface, gRPC Client |
-| `maix-gateway` | Client | HTTP gateway, gRPC → HTTP conversion |
-| `maix-server` | Core | maix.exe daemon, gRPC Server, Architecture DSL |
+Build output is in `build/` directory. For distribution, include the executable + `sql-wasm.wasm` + `.env`.
 
 ## Tech Stack
-| Component | Technology |
-|-----------|------------|
-| Language | Rust (edition 2021) |
-| Database | rusqlite (bundled SQLite) |
-| CLI | clap |
-| TUI | ratatui + crossterm |
-| HTTP | axum 0.8 (REST + SSE + WebSocket) |
-| Serialization | serde + serde_json + toml |
-| Async | tokio |
-| Logging | tracing |
+
+| Category | Technology |
+|:---:|:---:|
+| Runtime | Node.js |
+| Language | TypeScript (strict mode, ESM) |
+| Terminal UI | terminal-kit |
+| Database | sql.js (SQLite WASM) |
+| LLM SDK | openai, @anthropic-ai/sdk |
+| Markdown Rendering | marked, highlight.js |
+| WebSocket | ws |
+| Package Manager | pnpm |
+| Build Tool | Bun (cross-compilation), esbuild (bundling) |
 
 ## Project Structure
+
 ```
-maix-agent/
-├── crates/              # 13 workspace crates
-├── config/              # default.toml
-├── proto/               # Protobuf protocol definitions
-├── Cargo.toml           # Workspace root config
-├── Cargo.lock
-├── Dockerfile
-├── README.md            # English README (this file)
-└── README_zh-CN.md      # Chinese README
+Maix-Agent/
+├── src/                    # Source directory
+│   ├── backend/            #   Backend core
+│   │   ├── core/           #     Core types, config, errors, logger
+│   │   ├── provider/       #     LLM Providers
+│   │   ├── agent/          #     Agent core
+│   │   ├── tools/          #     Tool system
+│   │   ├── mcp/            #     MCP protocol
+│   │   └── monitor/        #     Monitoring service
+│   └── tui/                #   Frontend TUI
+│       ├── app.ts          #     TUI main application
+│       ├── api/            #     API adapter layer
+│       ├── panels/         #     Status panels
+│       ├── themes/         #     Theme management
+│       └── utils/          #     Utilities
+├── scripts/                # Build scripts
+│   ├── bunbuild-*-windows_x64.mjs  # Bun cross-compilation (Windows x64)
+│   └── esbuild-*.mjs               # esbuild bundling
+├── build/                  # Bun compiled binaries
+├── dist/                   # esbuild bundled output
+├── package.json            # Project dependencies, scripts
+├── tsconfig.json           # TypeScript configuration
+├── .env.example            # Environment variables template
+├── AGENTS.md               # Agent development guidelines
+├── CONTRIBUTING.md         # Contributing guide
+├── SECURITY.md             # Security policy
+├── LICENSE                 # AGPL-3.0-or-later
+├── COMMERCIAL.md           # Commercial licensing
+└── COPYRIGHT               # Copyright notice
 ```
 
 ## Name Origin
-`Maix` = `Max` + `Mix`, meaning "maximum memory capability" and "hybrid architecture".
+`Maix` = `Max` + `Mix`, symbolizing "maximum memory capability" and "hybrid architecture".
 
 ## License
-- **AGPL-3.0-or-later** for open source use. See [[LICENSE]](./LICENSE)
+- **AGPL-3.0-or-later** for open-source use. See [[LICENSE]](./LICENSE)
 - **Commercial closed-source licensing** available. See [[COMMERCIAL.md]](./COMMERCIAL.md)
 
 ## Links
-- [[Report Issues and Requests]](https://github.com/JularDepick/Maix-Agent/issues)
+- [[Report Bugs & Request Features]](https://github.com/JularDepick/Maix-Agent/issues)
 - [[Apply for Commercial License]](./COMMERCIAL.md)
 
-## Acknowledgments
-- Thanks to open source projects [[DeepSeek-TUI]](https://github.com/Hmbown/DeepSeek-TUI) and [[OpenHanako]](https://github.com/liliMozi/openhanako) for providing implementation ideas and reference specifications for this project.
-- Thanks to [[Xiaomi MiMo-V2.5 Series Open Source & Orbit Hundred Trillion Token Plan]]() for providing **1600M credits** large model API service sponsorship for this project.
+## Acknowledgements
+- Thanks to the open-source community projects [[MiMoCode]](https://github.com/Hmbown/DeepSeek-TUI) and [[OpenHanako]](https://github.com/liliMozi/openhanako) for providing implementation ideas and reference standards for this project.
+- Thanks to [[Xiaomi MiMo-V2.5 Open Source & Orbit 100T Token Program]]() for sponsoring this project with a total of **1600M credits** of LLM API service support
   <img src="./.github/image/MiMo-V2.5-API-Support.png"/>
-- Thanks to [[DeepSeek Open Platform]](https://platform.deepseek.com) for providing high-quality, low-cost large model API service support for this project.
+- Thanks to [[DeepSeek Open Platform]](https://platform.deepseek.com) for providing high-quality, cost-effective LLM API service support for this project
   <img src="./.github/image/DeepSeek-API-Support.png" width="50%"/>
-- Thanks to [[Claude Code]](https://code.claude.com) for providing AI Agent programming support for this project.
+- Thanks to [[Claude Code]](https://code.claude.com) for providing AI Agent programming support for this project

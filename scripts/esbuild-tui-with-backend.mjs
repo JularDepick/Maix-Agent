@@ -1,0 +1,48 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+import { createRequire } from 'module';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.join(__dirname, '..');
+const outDir = path.join(rootDir, 'dist', 'esbuild-tui-with-backend');
+
+const require = createRequire(path.join(rootDir, 'package.json'));
+const esbuild = require('esbuild');
+
+if (!fs.existsSync(outDir)) {
+  fs.mkdirSync(outDir, { recursive: true });
+}
+
+const fixTerminalKitPlugin = {
+  name: 'fix-terminal-kit',
+  setup(build) {
+    build.onLoad({ filter: /termconfig[\\\/]README/ }, () => ({
+      contents: 'module.exports = {};',
+      loader: 'js',
+    }));
+
+    build.onLoad({ filter: /terminal-kit[\\\/]lib[\\\/]termkit\.js$/ }, async (args) => {
+      const noLazyPath = args.path.replace('termkit.js', 'termkit-no-lazy-require.js');
+      const contents = await fs.promises.readFile(noLazyPath, 'utf-8');
+      return { contents, loader: 'js' };
+    });
+  },
+};
+
+await esbuild.build({
+  entryPoints: [path.join(rootDir, 'src', 'tui', 'app.ts')],
+  bundle: true,
+  outfile: path.join(outDir, 'index.mjs'),
+  platform: 'node',
+  target: 'node20',
+  format: 'esm',
+  external: [],
+  loader: { '': 'text' },
+  plugins: [fixTerminalKitPlugin],
+  minify: false,
+  sourcemap: false,
+  logLevel: 'info',
+});
+
+console.log(`esbuild complete: ${outDir}/index.mjs`);
