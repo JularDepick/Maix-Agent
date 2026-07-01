@@ -48,18 +48,23 @@ class SkillTool extends BaseTool {
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<string> {
     if (this.def.command) {
-      const { exec } = await import('child_process');
+      const { execFile } = await import('child_process');
       const { promisify } = await import('util');
-      const execAsync = promisify(exec);
+      const execFileAsync = promisify(execFile);
 
       let cmd = this.def.command;
       for (const [key, value] of Object.entries(args)) {
         cmd = cmd.replace(`{${key}}`, String(value));
       }
 
-      const { stdout, stderr } = await execAsync(cmd, {
+      const parts = cmd.split(/\s+/);
+      const bin = parts[0];
+      const cmdArgs = parts.slice(1);
+
+      const { stdout, stderr } = await execFileAsync(bin, cmdArgs, {
         cwd: context.workingDir,
         timeout: 120000,
+        shell: false,
       });
 
       return stdout || stderr || 'Command executed successfully';
@@ -67,10 +72,14 @@ class SkillTool extends BaseTool {
 
     if (this.def.script) {
       const scriptPath = path.resolve(this.workingDir, this.def.script);
+      const normalizedWorking = path.resolve(this.workingDir);
+      if (!scriptPath.startsWith(normalizedWorking)) {
+        throw new Error('Script path must be within working directory');
+      }
       const scriptContent = await fs.readFile(scriptPath, 'utf-8');
 
       const vm = await import('vm');
-      const sandbox = { args, context, require: globalThis.require, console };
+      const sandbox = { args, context, console };
       vm.createContext(sandbox);
       const result = vm.runInContext(scriptContent, sandbox, { timeout: 30000 });
       return String(result);

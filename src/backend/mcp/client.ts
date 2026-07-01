@@ -48,7 +48,9 @@ export class StdioTransport extends MCPTransport {
         logger.debug(`MCP stderr: ${data.toString()}`);
       });
 
-      setTimeout(() => resolve(), 1000);
+      this.process.on('spawn', () => {
+        setTimeout(() => resolve(), 500);
+      });
     });
   }
 
@@ -68,7 +70,21 @@ export class StdioTransport extends MCPTransport {
       }
 
       const id = request.id;
-      this.pendingRequests.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error(`MCP request timeout: ${request.method}`));
+      }, 30000);
+
+      this.pendingRequests.set(id, {
+        resolve: (response) => {
+          clearTimeout(timer);
+          resolve(response);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
 
       const message = JSON.stringify(request) + '\n';
       this.process.stdin.write(message);

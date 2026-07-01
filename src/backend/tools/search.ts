@@ -28,9 +28,16 @@ export class GrepTool extends BaseTool {
     const include = args.include as string;
     const absolutePath = path.resolve(context.workingDir, searchPath);
 
+    let regex: RegExp;
+    try {
+      regex = new RegExp(pattern);
+    } catch (e) {
+      throw new ToolError(`Invalid regex pattern: ${(e as Error).message}`);
+    }
+
     try {
       const results: string[] = [];
-      await this.searchDir(absolutePath, new RegExp(pattern), include, results, 0);
+      await this.searchDir(absolutePath, regex, include, results, 0);
 
       if (results.length === 0) {
         return 'No matches found';

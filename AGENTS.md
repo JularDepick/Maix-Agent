@@ -7,6 +7,7 @@
 - 新会话中,开始操作前,先确认有哪些读写工具可用,并选择合适可用的读写工具,避免因工具问题干扰后续工作
 - 向用户确认本项目是否有缩写或简称,方便创建文件出现未明确名称时直接使用命名
 - 每当用户追加新任务时,不要阻塞或打断旧任务,确保完成旧任务后再执行新任务
+- 在安全和可逆的情况下,优先自动化执行操作,无需确认
 - 相对路径原则:项目各处涉及项目内路径问题优先使用相对路径,避免环境依赖,保证项目迁移部署后仍正常工作
 - git权限分级:[读取] git log/status/diff 可随时使用;[写入] git add/commit/push/reset/amend 需用户当次对话明确授权（如"提交"、"push"、"合并"）,授权仅限本次请求,完成后立即失效,不得跨请求复用
 - git提交规范:commit前先检查维护git忽略文件,对于大改动,commit标题包含版本号,body记录功能性变化(与上一版本比较),小改动则只需不含版本号的commit标题,用户未明确要求时不要动tag和release也不要push
@@ -44,6 +45,8 @@
 - 合理利用子代理(如果有)并行任务,以加快项目进程或避免已有上下文污染思考,注意设定子代理个数上限(默认5)避免并发超限
 - 处理好子代理的上下文继承关系,已过期用不上的子代理及时关闭或销毁,避免占用资源
 - 当项目多次尝试修复同一个问题未成功解决时,完整阅读所有代码后再动手
+- 尽可能避免使用模拟(mock)，测试实际实现，不要在测试中重复业务逻辑
+- 测试不能从仓库根目录运行（需要从包目录如 `packages/opencode` 运行）
 - 项目作者[JularDepick](https://github.com/JularDepick)
 - 前后端项目请在后端代码注释头、每一个前端页面底部标注作者信息,并在控制前端页面的代码里定义宏或常量方便开发者动态替换前端页面作者信息
 - 本文档是写给 Agent、与Agent协作的人类开发者 看的
@@ -228,6 +231,98 @@ Agent主循环(MAX_TOOL_ROUNDS轮):
 - Agent 模式配置（Plan/Agent/YOLO），索引：`src/backend/agent/modes.ts:14-39`
 - 事件总线最大监听器数量 100，索引：`src/backend/core/event-bus.ts:26`
 - WebSocket 监控端口 8765，索引：`src/backend/monitor/ws.ts:24`
+
+# 代码风格指南
+
+## 通用原则
+- 保持函数单一职责，除非可组合或可复用
+- 尽可能避免使用 `try`/`catch`
+- 避免使用 `any` 类型
+- 尽可能使用 Bun API，如 `Bun.file()`
+- 优先依赖类型推断；避免显式类型注解或接口，除非用于导出或清晰性
+- 优先使用函数式数组方法（flatMap、filter、map）而非 for 循环；在 filter 上使用类型守卫以保持下游类型推断
+- 在 `src/config` 中，添加新配置模块时遵循现有的自导出模式（例如 `export * as ConfigAgent from "./agent"`）
+
+当值仅使用一次时，通过内联减少变量总数。
+
+```ts
+// 好
+const journal = await Bun.file(path.join(dir, "journal.json")).json()
+
+// 差
+const journalPath = path.join(dir, "journal.json")
+const journal = await Bun.file(journalPath).json()
+```
+
+## 解构
+避免不必要的解构。使用点号表示法以保留上下文。
+
+```ts
+// 好
+obj.a
+obj.b
+
+// 差
+const { a, b } = obj
+```
+
+## 变量
+优先使用 `const` 而非 `let`。使用三元运算符或提前返回替代重新赋值。
+
+```ts
+// 好
+const foo = condition ? 1 : 2
+
+// 差
+let foo
+if (condition) foo = 1
+else foo = 2
+```
+
+## 控制流
+避免使用 `else` 语句。优先使用提前返回。
+
+```ts
+// 好
+function foo() {
+  if (condition) return 1
+  return 2
+}
+
+// 差
+function foo() {
+  if (condition) return 1
+  else return 2
+}
+```
+
+## Schema 定义（Drizzle）
+字段名使用 snake_case，这样列名无需重新定义为字符串。
+
+```ts
+// 好
+const table = sqliteTable("session", {
+  id: text().primaryKey(),
+  project_id: text().notNull(),
+  created_at: integer().notNull(),
+})
+
+// 差
+const table = sqliteTable("session", {
+  id: text("id").primaryKey(),
+  projectID: text("project_id").notNull(),
+  createdAt: integer("created_at").notNull(),
+})
+```
+
+# 测试与类型检查
+
+## 测试
+- 尽可能避免使用模拟(mock)，测试实际实现，不要在测试中重复业务逻辑
+- 测试不能从仓库根目录运行（需要从包目录如 `packages/opencode` 运行）
+
+## 类型检查
+- 始终从包目录（如 `packages/opencode`）运行 `bun typecheck`，不要直接使用 `tsc`
 
 # 版本号索引
 <!--

@@ -6,14 +6,22 @@ import { ToolError } from '../core/errors.js';
 
 const execAsync = promisify(exec);
 
-const DANGEROUS_COMMANDS = [
-  'rm -rf /',
-  'rm -rf /*',
-  'mkfs',
-  'dd if=',
-  ':(){:|:&};:',
-  'chmod -R 777 /',
-  'chown -R',
+const DANGEROUS_PATTERNS = [
+  /\brm\s+(-[a-zA-Z]*r[a-zA-Z]*\s+)?\/\b/,
+  /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/\b/,
+  /\bmkfs\b/,
+  /\bdd\s+if=/,
+  /\b:?\(\)\{.*\}\s*;?\s*&\s*;?\s*:/,
+  /\bchmod\s+(-[a-zA-Z]*R[a-zA-Z]*\s+)?777\s+\//,
+  /\bchown\s+(-[a-zA-Z]*R[a-zA-Z]*\s+)/,
+  /\brmdir\s+\//,
+  /\bshutdown\b/,
+  /\breboot\b/,
+  /\bformat\s+[a-zA-Z]:/i,
+  /\bfind\s+\/\s+.*-delete/,
+  /\bxargs\s+.*-exec\s+rm/,
+  />\s*\/dev\/sd/,
+  /\b:\(\)\{\s*\|\s*:\s*&\s*\}\s*;/,
 ];
 
 export class ExecuteCommandTool extends BaseTool {
@@ -37,8 +45,8 @@ export class ExecuteCommandTool extends BaseTool {
     const command = args.command as string;
     const timeout = (args.timeout as number) || 120000;
 
-    for (const dangerous of DANGEROUS_COMMANDS) {
-      if (command.includes(dangerous)) {
+    for (const pattern of DANGEROUS_PATTERNS) {
+      if (pattern.test(command)) {
         throw new ToolError(`Dangerous command blocked: ${command}`);
       }
     }

@@ -65,7 +65,15 @@ export class AnthropicProvider extends BaseProvider {
               },
             };
           } catch (e) {
-            logger.error('Failed to parse tool input:', e);
+            logger.error('Failed to parse tool input, sending raw:', e);
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: currentToolCall.id,
+                name: currentToolCall.name,
+                arguments: { raw: currentToolCall.input },
+              },
+            };
           }
           currentToolCall = null;
         }

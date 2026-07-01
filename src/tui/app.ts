@@ -40,12 +40,17 @@ export class TuiApp {
     if (!term.width || term.width <= 0) term.width = cols;
     if (!term.height || term.height <= 0) term.height = rows;
 
-    term.clear();
-    term.grabInput(true);
-    term.hideCursor(false);
+    try {
+      term.clear();
+      term.grabInput(true);
+      term.hideCursor(false);
+    } catch (e) {
+      process.stdout.write(`\x1b[31mTerminal init failed: ${(e as Error).message}\x1b[0m\n`);
+      process.exit(1);
+    }
 
+    await this.renderStatusBar();
     this.renderHeader();
-    this.renderStatusBar();
     this.renderChatArea();
     this.renderInput();
 
@@ -570,8 +575,9 @@ export class TuiApp {
 
     const prefix = key.startsWith('MAIX_AGENT_') ? '' : 'MAIX_AGENT_';
     const fullKey = `${prefix}${key}`;
+    const escapedKey = fullKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    const regex = new RegExp(`^${fullKey}=.*$`, 'm');
+    const regex = new RegExp(`^${escapedKey}=.*$`, 'm');
     if (regex.test(content)) {
       content = content.replace(regex, `${fullKey}=${value}`);
     } else {
@@ -731,8 +737,9 @@ export class TuiApp {
   private cleanup(): void {
     if (this.autoSaveTimer) {
       clearInterval(this.autoSaveTimer);
+      this.autoSaveTimer = null;
     }
-    this.autoSave();
+    this.autoSave().catch(() => {});
     term.grabInput(false);
     term.clear();
   }

@@ -49,7 +49,8 @@ export class StatusPanel {
     const startRow = 3;
     const panelWidth = 30;
 
-    term.moveTo(term.width - panelWidth, startRow);
+    const xPos = Math.max((Number(term.width) || 80) - panelWidth, 1);
+    term.moveTo(xPos, startRow);
     term.bgColorHex(theme.border);
     term.colorHex(theme.accent);
     term.bold(' Status Panel ');
@@ -66,7 +67,7 @@ export class StatusPanel {
     ];
 
     for (let i = 0; i < lines.length; i++) {
-      term.moveTo(term.width - panelWidth, startRow + 1 + i);
+      term.moveTo(xPos, startRow + 1 + i);
       term.bgColorHex(theme.bg);
       term.colorHex(theme.fg);
       term(` ${lines[i].padEnd(panelWidth - 2)}`);

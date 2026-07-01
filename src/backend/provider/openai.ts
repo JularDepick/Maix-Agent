@@ -63,7 +63,7 @@ export class OpenAIProvider extends BaseProvider {
                   name: toolCall.function.name,
                   arguments: toolCall.function.arguments || '',
                 };
-              } else if (toolCall.function?.arguments && currentToolCall) {
+              } else if (toolCall.function?.arguments != null && currentToolCall) {
                 currentToolCall.arguments += toolCall.function.arguments;
               }
             }

@@ -4,6 +4,15 @@ import { BaseTool } from './base.js';
 import { ToolDefinition, ToolContext } from '../core/types.js';
 import { ToolError } from '../core/errors.js';
 
+function safePath(workingDir: string, filePath: string): string {
+  const resolved = path.resolve(workingDir, filePath);
+  const normalizedWorking = path.resolve(workingDir);
+  if (!resolved.startsWith(normalizedWorking + path.sep) && resolved !== normalizedWorking) {
+    throw new ToolError(`Path traversal blocked: ${filePath}`);
+  }
+  return resolved;
+}
+
 export class ReadFileTool extends BaseTool {
   getDefinition(): ToolDefinition {
     return {
@@ -22,7 +31,7 @@ export class ReadFileTool extends BaseTool {
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<string> {
     const filePath = args.path as string;
-    const absolutePath = path.resolve(context.workingDir, filePath);
+    const absolutePath = safePath(context.workingDir, filePath);
 
     try {
       const content = await fs.readFile(absolutePath, 'utf-8');
@@ -53,7 +62,7 @@ export class WriteFileTool extends BaseTool {
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<string> {
     const filePath = args.path as string;
     const content = args.content as string;
-    const absolutePath = path.resolve(context.workingDir, filePath);
+    const absolutePath = safePath(context.workingDir, filePath);
 
     try {
       const dir = path.dirname(absolutePath);
@@ -84,7 +93,7 @@ export class ListFilesTool extends BaseTool {
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<string> {
     const dirPath = args.path as string;
-    const absolutePath = path.resolve(context.workingDir, dirPath);
+    const absolutePath = safePath(context.workingDir, dirPath);
 
     try {
       const entries = await fs.readdir(absolutePath, { withFileTypes: true });
@@ -122,7 +131,7 @@ export class EditFileTool extends BaseTool {
     const filePath = args.path as string;
     const oldText = args.old_text as string;
     const newText = args.new_text as string;
-    const absolutePath = path.resolve(context.workingDir, filePath);
+    const absolutePath = safePath(context.workingDir, filePath);
 
     try {
       let content = await fs.readFile(absolutePath, 'utf-8');

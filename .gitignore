@@ -39,3 +39,6 @@ temp/
 # Agent 工具目录
 .mimocode/
 .claude/
+
+.startClaude.bat
+.startMiMo.bat

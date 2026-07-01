@@ -31,11 +31,15 @@ export class WsAdapter implements BackendAPI {
 
       this.ws.onopen = () => resolve();
       this.ws.onerror = (e) => reject(e);
+      this.ws.onclose = () => {
+        this.rejectPendingWait();
+      };
       this.ws.onmessage = (e) => {
         try {
           const event = JSON.parse(e.data as string) as AgentEvent;
           this.eventQueue.push(event);
           this.waitResolve?.();
+          this.waitResolve = null;
         } catch (err) {
           // ignore
         }
@@ -43,8 +47,19 @@ export class WsAdapter implements BackendAPI {
     });
   }
 
+  private rejectPendingWait(): void {
+    if (this.waitResolve) {
+      const resolve = this.waitResolve;
+      this.waitResolve = null;
+      resolve();
+    }
+  }
+
   private async waitForEvent(): Promise<AgentEvent | null> {
     while (this.eventQueue.length === 0) {
+      if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
+        return null;
+      }
       await new Promise<void>((resolve) => {
         this.waitResolve = resolve;
       });

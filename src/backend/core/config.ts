@@ -10,15 +10,11 @@ import os from 'os';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function getExeDir(): string {
-  try {
-    if (typeof globalThis !== 'undefined' && 'Bun' in globalThis) {
-      const bunMain = (globalThis as Record<string, unknown>).Bun;
-      if (bunMain && typeof bunMain === 'object' && 'main' in bunMain) {
-        return path.dirname((bunMain as { main: string }).main);
-      }
-    }
-  } catch {}
-  return path.dirname(process.argv[0] || process.cwd());
+  const execDir = path.dirname(process.execPath);
+  if (execDir && execDir.length > 1 && execDir !== path.sep && execDir !== '/') {
+    return execDir;
+  }
+  return process.cwd();
 }
 
 const EXE_DIR = getExeDir();
@@ -114,7 +110,8 @@ export function loadConfig(): AppConfig {
   const enableModelRouter = getEnv('ENABLE_MODEL_ROUTER', 'false') === 'true';
   const enableMCP = getEnv('ENABLE_MCP', 'false') === 'true';
   const skillsDir = getEnv('SKILLS_DIR', path.join(EXE_DIR, 'skills'));
-  const wsPort = parseInt(getEnv('WS_PORT', '8765'), 10);
+  const wsPortRaw = parseInt(getEnv('WS_PORT', '8765'), 10);
+  const wsPort = Number.isNaN(wsPortRaw) ? 8765 : wsPortRaw;
 
   let mcpServers: Record<string, { command: string; args?: string[] }> = {};
   const mcpServersStr = getEnv('MCP_SERVERS');

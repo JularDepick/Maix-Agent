@@ -57,11 +57,13 @@ export class EventBus {
   }
 
   off<K extends EventKey>(event: K, handler: Handler): void {
-    this.handlers.get(event)?.delete(handler);
-    this.onceHandlers.get(event)?.delete(handler);
-    const count = this.listenerCount.get(event) || 0;
-    if (count > 0) {
-      this.listenerCount.set(event, count - 1);
+    const inRegular = this.handlers.get(event)?.delete(handler) ?? false;
+    const inOnce = this.onceHandlers.get(event)?.delete(handler) ?? false;
+    if (inRegular || inOnce) {
+      const count = this.listenerCount.get(event) || 0;
+      if (count > 0) {
+        this.listenerCount.set(event, count - 1);
+      }
     }
   }
 
@@ -80,14 +82,15 @@ export class EventBus {
     }
 
     if (onceHandlers && onceHandlers.size > 0) {
-      for (const handler of onceHandlers) {
+      const toExecute = [...onceHandlers];
+      onceHandlers.clear();
+      for (const handler of toExecute) {
         try {
           handler(data);
         } catch (error) {
           logger.error(`EventBus: once handler error for "${event}":`, error);
         }
       }
-      onceHandlers.clear();
     }
   }
 

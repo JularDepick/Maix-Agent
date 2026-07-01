@@ -84,7 +84,7 @@ Always be helpful, concise, and accurate. When working with files, use the provi
 
     let finalUsage: TokenUsage | undefined;
 
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    for (let round = 0; round < this.modeManager.getMaxToolRounds(); round++) {
       try {
         const stream = this.provider.chat(contextMessages);
 

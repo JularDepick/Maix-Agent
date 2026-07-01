@@ -47,7 +47,7 @@ export class ContextManager {
 
     for (let i = nonSystemMessages.length - 1; i >= 0; i--) {
       const msg = nonSystemMessages[i];
-      const msgTokens = this.estimateTokens(msg.content);
+      const msgTokens = this.calculateMessageTokens([msg]);
 
       if (currentTokens + msgTokens > availableTokens) {
         const summary = this.createSummary(nonSystemMessages.slice(0, i + 1));

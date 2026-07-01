@@ -77,7 +77,7 @@ export class ToolRegistry {
           throw new ToolError(`Tool ${name} was denied by user`);
         }
       } else {
-        logger.warn(`Tool ${name} requires approval but no handler set`);
+        throw new ToolError(`Tool ${name} requires approval but no handler is configured`);
       }
     }
 

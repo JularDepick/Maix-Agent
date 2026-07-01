@@ -12,13 +12,25 @@ import {
 
 export class HttpAdapter implements BackendAPI {
   private baseUrl: string;
+  private timeoutMs: number;
 
-  constructor(baseUrl: string) {
+  constructor(baseUrl: string, timeoutMs: number = 30000) {
     this.baseUrl = baseUrl;
+    this.timeoutMs = timeoutMs;
+  }
+
+  private async fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async *run(input: string): AsyncGenerator<AgentEvent, void, unknown> {
-    const response = await fetch(`${this.baseUrl}/api/chat`, {
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ input })
@@ -58,15 +70,15 @@ export class HttpAdapter implements BackendAPI {
   getSessionManager(): SessionManagerAPI {
     return {
       getCurrentSession: async () => {
-        const res = await fetch(`${this.baseUrl}/api/sessions/current`);
+        const res = await this.fetchWithTimeout(`${this.baseUrl}/api/sessions/current`);
         return res.ok ? (await res.json()) as Session : null;
       },
       listSessions: async () => {
-        const res = await fetch(`${this.baseUrl}/api/sessions`);
+        const res = await this.fetchWithTimeout(`${this.baseUrl}/api/sessions`);
         return res.ok ? (await res.json()) as Session[] : [];
       },
       createSession: async (name?: string) => {
-        const res = await fetch(`${this.baseUrl}/api/sessions`, {
+        const res = await this.fetchWithTimeout(`${this.baseUrl}/api/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name })
@@ -74,7 +86,7 @@ export class HttpAdapter implements BackendAPI {
         return (await res.json()) as Session;
       },
       clearMessages: async () => {
-        await fetch(`${this.baseUrl}/api/sessions/current/messages`, {
+        await this.fetchWithTimeout(`${this.baseUrl}/api/sessions/current/messages`, {
           method: 'DELETE'
         });
       }
@@ -84,7 +96,7 @@ export class HttpAdapter implements BackendAPI {
   getProvider(): ProviderAPI {
     return {
       getModel: async () => {
-        const res = await fetch(`${this.baseUrl}/api/provider/model`);
+        const res = await this.fetchWithTimeout(`${this.baseUrl}/api/provider/model`);
         return res.ok ? ((await res.json()) as { model: string }).model : 'unknown';
       }
     };
@@ -93,7 +105,7 @@ export class HttpAdapter implements BackendAPI {
   getTools(): ToolsAPI | null {
     return {
       autoApproveTool: async (name: string) => {
-        await fetch(`${this.baseUrl}/api/tools/auto-approve`, {
+        await this.fetchWithTimeout(`${this.baseUrl}/api/tools/auto-approve`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name })
@@ -105,7 +117,7 @@ export class HttpAdapter implements BackendAPI {
   getModeManager(): ModeManagerAPI {
     return {
       getCurrentMode: async () => {
-        const res = await fetch(`${this.baseUrl}/api/mode/current`);
+        const res = await this.fetchWithTimeout(`${this.baseUrl}/api/mode/current`);
         return res.ok ? ((await res.json()) as { mode: AgentMode }).mode : 'agent';
       },
       getAvailableModes: async () => ['plan', 'agent', 'yolo'],
@@ -118,7 +130,7 @@ export class HttpAdapter implements BackendAPI {
         return descriptions[mode];
       },
       switchMode: async (mode: AgentMode) => {
-        await fetch(`${this.baseUrl}/api/mode/switch`, {
+        await this.fetchWithTimeout(`${this.baseUrl}/api/mode/switch`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ mode })
@@ -134,7 +146,7 @@ export class HttpAdapter implements BackendAPI {
   getMemory(): MemoryAPI {
     return {
       saveSession: async (session: Session) => {
-        await fetch(`${this.baseUrl}/api/sessions/${session.id}/save`, {
+        await this.fetchWithTimeout(`${this.baseUrl}/api/sessions/${session.id}/save`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(session)
